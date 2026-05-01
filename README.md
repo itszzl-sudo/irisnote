@@ -208,6 +208,43 @@ Configuration content:
 
 ## 🔨 Development
 
+### Quick Commit with Auto Version Bump
+
+Use the smart commit script for automatic version management:
+
+```powershell
+# Patch version (0.1.0 → 0.1.1) - default
+.\commit.ps1 "Fix bug in syntax highlighting"
+
+# Minor version (0.1.0 → 0.2.0)
+.\commit.ps1 "Add new feature" minor
+
+# Major version (0.1.0 → 1.0.0)
+.\commit.ps1 "Breaking changes" major
+
+# No version bump
+.\commit.ps1 "Update docs" none
+```
+
+### Manual Version Management
+
+```powershell
+# Show current version
+.\version.ps1 show
+
+# Bump patch version
+.\version.ps1 patch
+
+# Bump minor version
+.\version.ps1 minor
+
+# Bump major version
+.\version.ps1 major
+
+# Create and push tag
+.\version.ps1 tag
+```
+
 ### Debug Build
 
 ```bash
@@ -218,6 +255,8 @@ cargo build
 
 ```bash
 cargo build --release
+# Or use the build script
+.\build.ps1 release
 ```
 
 ### Run Tests
