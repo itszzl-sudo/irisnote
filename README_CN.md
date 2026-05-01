@@ -291,6 +291,10 @@ winget install Microsoft.VCRedist.2015+.x64
 - [resvg](https://github.com/RazrFalcon/resvg) - SVG 渲染库
 - [syntect](https://github.com/trishume/syntect) - 语法高亮库
 
+### 代码签名
+
+免费代码签名由 [SignPath.io](https://signpath.io/) 提供，证书由 [SignPath Foundation](https://signpath.org/) 颁发
+
 ## 📮 联系方式
 
 - 问题反馈: [GitHub Issues](https://github.com/itszzl-sudo/irisnote/issues)

@@ -354,6 +354,10 @@ This project uses the following open-source libraries:
 - [resvg](https://github.com/RazrFalcon/resvg) - SVG rendering library
 - [syntect](https://github.com/trishume/syntect) - Syntax highlighting library
 
+### Code Signing
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/)
+
 ## 📮 Contact
 
 - Issue Tracker: [GitHub Issues](https://github.com/itszzl-sudo/irisnote/issues)
