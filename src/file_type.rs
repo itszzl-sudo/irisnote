@@ -20,6 +20,54 @@ pub enum FileType {
     CPP,
     Java,
     Go,
+    Kotlin,
+    Swift,
+    Ruby,
+    PHP,
+    Perl,
+    Lua,
+    Shell,
+    PowerShell,
+    SQL,
+    Dockerfile,
+    Makefile,
+    CMake,
+    Config,
+    Unknown(String),
+}
+
+impl FileType {
+    pub fn to_syntax_name(&self) -> Option<&'static str> {
+        match self {
+            FileType::Rust => Some("Rust"),
+            FileType::Python => Some("Python"),
+            FileType::JavaScript => Some("JavaScript"),
+            FileType::TypeScript => Some("TypeScript"),
+            FileType::HTML => Some("HTML"),
+            FileType::CSS => Some("CSS"),
+            FileType::JSON => Some("JSON"),
+            FileType::XML => Some("XML"),
+            FileType::YAML => Some("YAML"),
+            FileType::TOML => Some("TOML"),
+            FileType::C => Some("C"),
+            FileType::CPP => Some("C++"),
+            FileType::Java => Some("Java"),
+            FileType::Go => Some("Go"),
+            FileType::Kotlin => Some("Kotlin"),
+            FileType::Swift => Some("Swift"),
+            FileType::Ruby => Some("Ruby"),
+            FileType::PHP => Some("PHP"),
+            FileType::Perl => Some("Perl"),
+            FileType::Lua => Some("Lua"),
+            FileType::Shell => Some("Bash"),
+            FileType::PowerShell => Some("PowerShell"),
+            FileType::SQL => Some("SQL"),
+            FileType::Dockerfile => Some("Dockerfile"),
+            FileType::Makefile => Some("Makefile"),
+            FileType::CMake => Some("CMake"),
+            _ => None,
+        }
+    }
 }
 
 pub fn get_supported_extensions() -> Vec<String> {
@@ -101,7 +149,18 @@ pub fn detect_file_type(content: &str, path: Option<&Path>) -> FileType {
                 "cpp" | "cc" | "cxx" | "hpp" => FileType::CPP,
                 "java" => FileType::Java,
                 "go" => FileType::Go,
-                _ => detect_from_content(content),
+                "kt" | "kts" => FileType::Kotlin,
+                "swift" => FileType::Swift,
+                "rb" => FileType::Ruby,
+                "php" => FileType::PHP,
+                "pl" | "pm" => FileType::Perl,
+                "lua" => FileType::Lua,
+                "sh" | "bash" | "zsh" => FileType::Shell,
+                "ps1" | "psm1" => FileType::PowerShell,
+                "sql" => FileType::SQL,
+                "cmake" => FileType::CMake,
+                "ini" | "cfg" | "conf" | "properties" => FileType::Config,
+                _ => FileType::Unknown(ext.to_string()),
             };
         }
         
@@ -113,8 +172,14 @@ pub fn detect_file_type(content: &str, path: Option<&Path>) -> FileType {
             if filename_lower == "package.json" {
                 return FileType::JSON;
             }
-            if filename_lower == "makefile" || filename_lower == "dockerfile" {
-                return FileType::PlainText;
+            if filename_lower == "makefile" {
+                return FileType::Makefile;
+            }
+            if filename_lower == "dockerfile" {
+                return FileType::Dockerfile;
+            }
+            if filename_lower == "cmakelists.txt" {
+                return FileType::CMake;
             }
         }
     }
@@ -235,6 +300,20 @@ fn get_extension_for_type(file_type: &FileType) -> String {
         FileType::CPP => "cpp".to_string(),
         FileType::Java => "java".to_string(),
         FileType::Go => "go".to_string(),
+        FileType::Kotlin => "kt".to_string(),
+        FileType::Swift => "swift".to_string(),
+        FileType::Ruby => "rb".to_string(),
+        FileType::PHP => "php".to_string(),
+        FileType::Perl => "pl".to_string(),
+        FileType::Lua => "lua".to_string(),
+        FileType::Shell => "sh".to_string(),
+        FileType::PowerShell => "ps1".to_string(),
+        FileType::SQL => "sql".to_string(),
+        FileType::Dockerfile => "Dockerfile".to_string(),
+        FileType::Makefile => "Makefile".to_string(),
+        FileType::CMake => "cmake".to_string(),
+        FileType::Config => "cfg".to_string(),
+        FileType::Unknown(ext) => ext.clone(),
     }
 }
 

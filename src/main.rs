@@ -2,6 +2,7 @@ mod file_type;
 mod preview;
 mod config;
 mod file_association;
+mod syntax_highlight;
 
 #[cfg(feature = "bitnet")]
 mod bitnet_service;
@@ -234,6 +235,20 @@ impl TextEditor {
             FileType::CPP => "cpp".to_string(),
             FileType::Java => "java".to_string(),
             FileType::Go => "go".to_string(),
+            FileType::Kotlin => "kt".to_string(),
+            FileType::Swift => "swift".to_string(),
+            FileType::Ruby => "rb".to_string(),
+            FileType::PHP => "php".to_string(),
+            FileType::Perl => "pl".to_string(),
+            FileType::Lua => "lua".to_string(),
+            FileType::Shell => "sh".to_string(),
+            FileType::PowerShell => "ps1".to_string(),
+            FileType::SQL => "sql".to_string(),
+            FileType::Dockerfile => "Dockerfile".to_string(),
+            FileType::Makefile => "Makefile".to_string(),
+            FileType::CMake => "cmake".to_string(),
+            FileType::Config => "cfg".to_string(),
+            FileType::Unknown(ext) => ext.clone(),
         }
     }
     

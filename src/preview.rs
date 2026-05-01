@@ -1,6 +1,10 @@
 use crate::file_type::FileType;
+use crate::syntax_highlight::SyntaxHighlighter;
 use egui::{Color32, FontId, RichText, Ui};
 use pulldown_cmark::{html::push_html, Parser};
+use std::sync::OnceLock;
+
+static HIGHLIGHTER: OnceLock<SyntaxHighlighter> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PreviewMode {
@@ -254,155 +258,31 @@ fn render_svg(ui: &mut Ui, svg_content: &str) {
 }
 
 fn render_highlighted(ui: &mut Ui, text: &str, file_type: &FileType) {
-    let syntax = match file_type {
-        FileType::Rust => "rust",
-        FileType::Python => "python",
-        FileType::JavaScript => "javascript",
-        FileType::TypeScript => "typescript",
-        FileType::HTML => "html",
-        FileType::CSS => "css",
-        FileType::JSON => "json",
-        FileType::XML => "xml",
-        FileType::YAML => "yaml",
-        FileType::TOML => "toml",
-        FileType::C => "c",
-        FileType::CPP => "cpp",
-        FileType::Java => "java",
-        FileType::Go => "go",
-        _ => "text",
-    };
+    let highlighter = HIGHLIGHTER.get_or_init(|| SyntaxHighlighter::new());
+    
+    let syntax_name = file_type.to_syntax_name();
     
     egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.label(RichText::new(format!("语法: {}", syntax)).color(Color32::GRAY));
+        if let Some(syntax) = syntax_name {
+            ui.label(RichText::new(format!("语法: {}", syntax)).color(Color32::GRAY));
+        } else {
+            ui.label(RichText::new("无语法高亮").color(Color32::GRAY));
+        }
         ui.add_space(10.0);
         
-        for line in text.lines() {
-            let colored_line = apply_simple_highlighting(line, file_type);
-            ui.horizontal(|ui| {
-                for (text, color) in colored_line {
-                    ui.label(RichText::new(text).font(FontId::monospace(12.0)).color(color));
-                }
-            });
+        if let Some(syntax) = syntax_name {
+            let lines = highlighter.highlight(text, syntax);
+            for line in lines {
+                ui.horizontal(|ui| {
+                    for segment in line.segments {
+                        ui.label(RichText::new(&segment.text).font(FontId::monospace(12.0)).color(segment.color));
+                    }
+                });
+            }
+        } else {
+            for line in text.lines() {
+                ui.label(RichText::new(line).font(FontId::monospace(12.0)));
+            }
         }
     });
-}
-
-fn apply_simple_highlighting(line: &str, file_type: &FileType) -> Vec<(String, Color32)> {
-    let mut result = Vec::new();
-    
-    let keywords = match file_type {
-        FileType::Rust => vec!["fn", "let", "mut", "if", "else", "match", "struct", "enum", "impl", "pub", "use", "mod", "const", "static", "trait", "type", "where", "for", "while", "loop", "return", "break", "continue", "self", "Self"],
-        FileType::Python => vec!["def", "class", "if", "elif", "else", "for", "while", "import", "from", "as", "return", "yield", "with", "try", "except", "finally", "raise", "lambda", "and", "or", "not", "in", "is", "True", "False", "None", "self"],
-        FileType::JavaScript | FileType::TypeScript => vec!["function", "const", "let", "var", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "return", "class", "extends", "new", "this", "super", "import", "export", "from", "async", "await", "try", "catch", "finally", "throw"],
-        FileType::Java => vec!["public", "private", "protected", "class", "interface", "extends", "implements", "new", "this", "super", "static", "final", "void", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "try", "catch", "finally", "throw", "throws", "import", "package"],
-        FileType::Go => vec!["package", "import", "func", "var", "const", "type", "struct", "interface", "map", "chan", "if", "else", "for", "range", "switch", "case", "default", "break", "continue", "return", "go", "defer", "select"],
-        _ => vec![],
-    };
-    
-    if keywords.is_empty() {
-        result.push((line.to_string(), Color32::WHITE));
-        return result;
-    }
-    
-    let mut current = String::new();
-    let mut in_string = false;
-    let mut in_comment = false;
-    let mut string_char = ' ';
-    
-    let chars: Vec<char> = line.chars().collect();
-    let mut i = 0;
-    
-    while i < chars.len() {
-        let c = chars[i];
-        
-        if in_comment {
-            current.push(c);
-            i += 1;
-            continue;
-        }
-        
-        if in_string {
-            current.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                i += 1;
-                current.push(chars[i]);
-            } else if c == string_char {
-                result.push((current.clone(), Color32::GREEN));
-                current.clear();
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-        
-        if c == '"' || c == '\'' {
-            if !current.is_empty() {
-                result.push((current.clone(), Color32::WHITE));
-                current.clear();
-            }
-            in_string = true;
-            string_char = c;
-            current.push(c);
-            i += 1;
-            continue;
-        }
-        
-        if c == '/' && i + 1 < chars.len() {
-            if chars[i + 1] == '/' {
-                if !current.is_empty() {
-                    result.push((current.clone(), Color32::WHITE));
-                    current.clear();
-                }
-                let comment: String = chars[i..].iter().collect();
-                result.push((comment, Color32::GRAY));
-                break;
-            }
-        }
-        
-        if c == '#' && (file_type == &FileType::Python || file_type == &FileType::Rust) {
-            if !current.is_empty() {
-                result.push((current.clone(), Color32::WHITE));
-                current.clear();
-            }
-            let comment: String = chars[i..].iter().collect();
-            result.push((comment, Color32::GRAY));
-            break;
-        }
-        
-        if c.is_whitespace() || c == '(' || c == ')' || c == '{' || c == '}' || c == '[' || c == ']' || c == ';' || c == ',' || c == '.' || c == ':' || c == '=' || c == '+' || c == '-' || c == '*' || c == '/' || c == '<' || c == '>' || c == '!' || c == '&' || c == '|' {
-            if !current.is_empty() {
-                let color = if keywords.contains(&current.as_str()) {
-                    Color32::from_rgb(255, 121, 198)
-                } else if current.starts_with(char::is_uppercase) && file_type == &FileType::Rust {
-                    Color32::from_rgb(102, 217, 239)
-                } else if current.parse::<f64>().is_ok() {
-                    Color32::from_rgb(249, 145, 87)
-                } else {
-                    Color32::WHITE
-                };
-                result.push((current.clone(), color));
-                current.clear();
-            }
-            result.push((c.to_string(), Color32::WHITE));
-        } else {
-            current.push(c);
-        }
-        
-        i += 1;
-    }
-    
-    if !current.is_empty() {
-        let color = if keywords.contains(&current.as_str()) {
-            Color32::from_rgb(255, 121, 198)
-        } else if current.starts_with(char::is_uppercase) && file_type == &FileType::Rust {
-            Color32::from_rgb(102, 217, 239)
-        } else if current.parse::<f64>().is_ok() {
-            Color32::from_rgb(249, 145, 87)
-        } else {
-            Color32::WHITE
-        };
-        result.push((current, color));
-    }
-    
-    result
 }
