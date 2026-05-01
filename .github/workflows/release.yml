@@ -56,13 +56,18 @@ jobs:
         $zipName = "irisnote-$version-windows-x64.zip"
         
         # Create zip with README and LICENSE
-        Compress-Archive -Path `
-          target\release\irisnote.exe,`
-          README.md,`
-          README_CN.md,`
-          LICENSE,`
-          NOTICE `
-          -DestinationPath $zipName
+        $files = @(
+          "target\release\irisnote.exe",
+          "README.md",
+          "README_CN.md",
+          "LICENSE"
+        )
+        
+        if (Test-Path "NOTICE") {
+          $files += "NOTICE"
+        }
+        
+        Compress-Archive -Path $files -DestinationPath $zipName
         
         echo "ZIP_FILE=$zipName" >> $env:GITHUB_ENV
     
@@ -95,9 +100,19 @@ jobs:
         version="${{ steps.get_version.outputs.VERSION }}"
         tarName="irisnote-$version-linux-x64.tar.gz"
         
+        # Create tar with required files
         tar czf $tarName \
-          -C target/release irisnote \
-          -C $PWD README.md README_CN.md LICENSE NOTICE
+          --transform 's,^target/release/,,' \
+          target/release/irisnote \
+          README.md \
+          README_CN.md \
+          LICENSE
+        
+        if [ -f NOTICE ]; then
+          tar rf $tarName NOTICE
+          gzip -f $tarName
+          tarName="${tarName}.gz"
+        fi
         
         echo "TAR_FILE=$tarName" >> $GITHUB_ENV
     
@@ -128,9 +143,19 @@ jobs:
         version="${{ steps.get_version.outputs.VERSION }}"
         tarName="irisnote-$version-macos-x64.tar.gz"
         
+        # Create tar with required files
         tar czf $tarName \
-          -C target/release irisnote \
-          -C $PWD README.md README_CN.md LICENSE NOTICE
+          --transform 's,^target/release/,,' \
+          target/release/irisnote \
+          README.md \
+          README_CN.md \
+          LICENSE
+        
+        if [ -f NOTICE ]; then
+          tar rf $tarName NOTICE
+          gzip -f $tarName
+          tarName="${tarName}.gz"
+        fi
         
         echo "TAR_FILE=$tarName" >> $GITHUB_ENV
     
