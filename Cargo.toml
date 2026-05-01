@@ -9,7 +9,7 @@ license = "Apache-2.0"
 
 [features]
 default = []
-llm = ["tokio", "reqwest", "async-trait"]
+bitnet = ["candle-core", "candle-nn", "candle-transformers", "tokenizers", "hf-hub"]
 
 [dependencies]
 eframe = "0.27"
@@ -26,9 +26,13 @@ usvg = "0.40"
 tiny-skia = "0.11"
 winreg = "0.52"
 rfd = "0.14"
-tokio = { version = "1", features = ["full"], optional = true }
-reqwest = { version = "0.11", features = ["json"], optional = true }
-async-trait = { version = "0.1", optional = true }
+
+# BitNet dependencies (optional)
+candle-core = { version = "0.4", optional = true }
+candle-nn = { version = "0.4", optional = true }
+candle-transformers = { version = "0.4", optional = true }
+tokenizers = { version = "0.15", optional = true }
+hf-hub = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"

@@ -3,31 +3,21 @@ mod preview;
 mod config;
 mod file_association;
 
-#[cfg(feature = "llm")]
-mod llm_service;
+#[cfg(feature = "bitnet")]
+mod bitnet_service;
 
 use eframe::egui;
 use egui::{Color32, FontId, RichText, Vec2};
 use std::path::PathBuf;
 use std::fs;
-use crate::file_type::{detect_file_type, FileType};
-
-#[cfg(feature = "llm")]
-use crate::file_type::FilenameSuggester;
-
-#[cfg(feature = "llm")]
-use crate::llm_service::{LLMService, LLMConfig};
-
+use crate::file_type::{detect_file_type, FileType, suggest_filename};
 use crate::preview::{PreviewMode, render_preview};
 use crate::config::Config;
 
+#[cfg(feature = "bitnet")]
+use crate::bitnet_service::{BitNetService, BitNetConfig};
+
 fn main() -> eframe::Result<()> {
-    #[cfg(feature = "llm")]
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-    
-    #[cfg(feature = "llm")]
-    let _guard = rt.enter();
-    
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
@@ -52,16 +42,13 @@ struct TextEditor {
     show_preview: bool,
     message: Option<String>,
     
-    #[cfg(feature = "llm")]
-    filename_suggester: std::sync::Arc<FilenameSuggester>,
+    #[cfg(feature = "bitnet")]
+    bitnet_service: std::sync::Arc<BitNetService>,
     
-    #[cfg(feature = "llm")]
-    llm_enabled: bool,
+    #[cfg(feature = "bitnet")]
+    bitnet_enabled: bool,
     
-    #[cfg(feature = "llm")]
-    llm_available: bool,
-    
-    #[cfg(feature = "llm")]
+    #[cfg(feature = "bitnet")]
     suggested_filename: Option<String>,
 }
 
@@ -70,11 +57,11 @@ impl TextEditor {
         let config = Config::load().unwrap_or_default();
         let recent_paths = config.recent_paths.clone();
         
-        #[cfg(feature = "llm")]
+        #[cfg(feature = "bitnet")]
         {
-            let llm_config = LLMConfig::default();
-            let llm_enabled = llm_config.enabled;
-            let filename_suggester = std::sync::Arc::new(FilenameSuggester::with_llm(llm_config));
+            let bitnet_config = BitNetConfig::default();
+            let bitnet_enabled = bitnet_config.enabled;
+            let bitnet_service = std::sync::Arc::new(BitNetService::with_config(bitnet_config));
             
             Self {
                 text: String::new(),
@@ -85,14 +72,13 @@ impl TextEditor {
                 recent_paths,
                 show_preview: false,
                 message: None,
-                filename_suggester,
-                llm_enabled,
-                llm_available: false,
+                bitnet_service,
+                bitnet_enabled,
                 suggested_filename: None,
             }
         }
         
-        #[cfg(not(feature = "llm"))]
+        #[cfg(not(feature = "bitnet"))]
         {
             Self {
                 text: String::new(),
@@ -167,59 +153,77 @@ impl TextEditor {
         }
     }
     
-    #[cfg(feature = "llm")]
+    #[cfg(feature = "bitnet")]
     fn get_suggested_filename(&mut self) -> String {
         if let Some(ref name) = self.suggested_filename {
             return name.clone();
         }
         
-        let suggester = self.filename_suggester.clone();
-        let text = self.text.clone();
-        let file_path = self.file_path.clone();
-        let file_type = self.file_type.clone();
+        let traditional_name = suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type);
         
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-        let filename = rt.block_on(async {
-            suggester.suggest_filename(&text, file_path.as_deref(), &file_type).await
-        });
+        if traditional_name != "untitled.txt" && !traditional_name.starts_with("untitled.") {
+            return traditional_name;
+        }
         
-        self.suggested_filename = Some(filename.clone());
-        filename
-    }
-    
-    #[cfg(not(feature = "llm"))]
-    fn get_suggested_filename(&mut self) -> String {
-        crate::file_type::suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type)
-    }
-    
-    #[cfg(feature = "llm")]
-    fn check_llm_available(&mut self) {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-        self.llm_available = rt.block_on(async {
-            if let Some(llm) = crate::llm_service::LLMService::new().check_available().await {
-                llm
-            } else {
-                false
+        if self.bitnet_enabled {
+            match self.bitnet_service.summarize_content(&self.text) {
+                Ok(summary) if summary != "untitled" => {
+                    let ext = self.get_extension();
+                    let filename = format!("{}.{}", summary, ext);
+                    self.suggested_filename = Some(filename.clone());
+                    return filename;
+                }
+                _ => {}
             }
-        });
+        }
+        
+        traditional_name
     }
     
-    #[cfg(feature = "llm")]
-    fn suggest_filename_with_llm(&mut self) {
-        let suggester = self.filename_suggester.clone();
-        let text = self.text.clone();
-        let file_path = self.file_path.clone();
-        let file_type = self.file_type.clone();
+    #[cfg(not(feature = "bitnet"))]
+    fn get_suggested_filename(&mut self) -> String {
+        suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type)
+    }
+    
+    #[cfg(feature = "bitnet")]
+    fn get_extension(&self) -> String {
+        match &self.file_type {
+            FileType::PlainText => "txt".to_string(),
+            FileType::Markdown => "md".to_string(),
+            FileType::Rust => "rs".to_string(),
+            FileType::Python => "py".to_string(),
+            FileType::JavaScript => "js".to_string(),
+            FileType::TypeScript => "ts".to_string(),
+            FileType::HTML => "html".to_string(),
+            FileType::CSS => "css".to_string(),
+            FileType::JSON => "json".to_string(),
+            FileType::XML => "xml".to_string(),
+            FileType::YAML => "yaml".to_string(),
+            FileType::TOML => "toml".to_string(),
+            FileType::SVG => "svg".to_string(),
+            FileType::Image(ext) => ext.clone(),
+            FileType::C => "c".to_string(),
+            FileType::CPP => "cpp".to_string(),
+            FileType::Java => "java".to_string(),
+            FileType::Go => "go".to_string(),
+        }
+    }
+    
+    #[cfg(feature = "bitnet")]
+    fn summarize_with_bitnet(&mut self) {
+        self.message = Some("正在分析内容...".to_string());
         
-        self.message = Some("正在使用 AI 分析内容...".to_string());
-        
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-        let filename = rt.block_on(async {
-            suggester.suggest_filename(&text, file_path.as_deref(), &file_type).await
-        });
-        
-        self.suggested_filename = Some(filename.clone());
-        self.message = Some(format!("AI 建议文件名: {}", filename));
+        match self.bitnet_service.summarize_content(&self.text) {
+            Ok(summary) => {
+                let ext = self.get_extension();
+                let filename = format!("{}.{}", summary, ext);
+                self.suggested_filename = Some(filename.clone());
+                self.message = Some(format!("建议文件名: {}", filename));
+            }
+            Err(e) => {
+                self.message = Some(format!("分析失败: {}", e));
+            }
+        }
     }
 }
 
@@ -232,7 +236,7 @@ impl eframe::App for TextEditor {
                     self.file_path = None;
                     self.file_type = FileType::PlainText;
                     
-                    #[cfg(feature = "llm")]
+                    #[cfg(feature = "bitnet")]
                     {
                         self.suggested_filename = None;
                     }
@@ -291,22 +295,15 @@ impl eframe::App for TextEditor {
                 }
             });
             
-            #[cfg(feature = "llm")]
-            ui.menu_button("AI", |ui| {
-                ui.checkbox(&mut self.llm_enabled, "启用 AI 智能命名");
+            #[cfg(feature = "bitnet")]
+            ui.menu_button("智能分析", |ui| {
+                ui.checkbox(&mut self.bitnet_enabled, "启用智能命名");
                 
-                if self.llm_enabled {
+                if self.bitnet_enabled {
                     ui.separator();
                     
-                    if ui.button("检查 LLM 服务").clicked() {
-                        self.check_llm_available();
-                        let status = if self.llm_available { "✅ 可用" } else { "❌ 不可用" };
-                        self.message = Some(format!("LLM 服务状态: {}", status));
-                        ui.close_menu();
-                    }
-                    
-                    if ui.button("AI 分析当前内容").clicked() {
-                        self.suggest_filename_with_llm();
+                    if ui.button("分析当前内容").clicked() {
+                        self.summarize_with_bitnet();
                         ui.close_menu();
                     }
                     
@@ -317,18 +314,16 @@ impl eframe::App for TextEditor {
                 }
                 
                 ui.separator();
-                ui.label(format!("模型: Qwen2.5-Coder-0.5B"));
-                ui.label(format!("服务: localhost:8080"));
+                ui.label("基于关键词提取");
+                ui.label("无需外部依赖");
             });
             
-            #[cfg(not(feature = "llm"))]
-            ui.menu_button("AI", |ui| {
-                ui.label("AI 功能未启用");
+            #[cfg(not(feature = "bitnet"))]
+            ui.menu_button("智能分析", |ui| {
+                ui.label("智能分析未启用");
                 ui.separator();
-                ui.label("要启用 AI 功能，请使用:");
-                ui.label("cargo build --release --features llm");
-                ui.separator();
-                ui.hyperlink_to("了解更多", "https://github.com/itszzl-sudo/irisnote/blob/master/LLM_SETUP.md");
+                ui.label("要启用请使用:");
+                ui.label("cargo build --features bitnet");
             });
             
             #[cfg(target_os = "windows")]
@@ -357,17 +352,10 @@ impl eframe::App for TextEditor {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(msg).color(Color32::GREEN));
                     
-                    #[cfg(feature = "llm")]
-                    if self.llm_enabled {
+                    #[cfg(feature = "bitnet")]
+                    if self.bitnet_enabled {
                         ui.separator();
-                        let status = if self.llm_available { "🟢 AI" } else { "🔴 AI" };
-                        ui.label(status);
-                    }
-                    
-                    #[cfg(not(feature = "llm"))]
-                    {
-                        ui.separator();
-                        ui.label(RichText::new("标准版").color(Color32::GRAY));
+                        ui.label(RichText::new("🔍 智能分析").color(Color32::LIGHT_BLUE));
                     }
                 });
             });
@@ -395,7 +383,7 @@ impl eframe::App for TextEditor {
                                     self.text = text;
                                     self.update_file_type();
                                     
-                                    #[cfg(feature = "llm")]
+                                    #[cfg(feature = "bitnet")]
                                     {
                                         self.suggested_filename = None;
                                     }
@@ -421,7 +409,7 @@ impl eframe::App for TextEditor {
                         self.text = text;
                         self.update_file_type();
                         
-                        #[cfg(feature = "llm")]
+                        #[cfg(feature = "bitnet")]
                         {
                             self.suggested_filename = None;
                         }
