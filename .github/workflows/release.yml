@@ -55,7 +55,6 @@ jobs:
         $version = "${{ steps.get_version.outputs.VERSION }}"
         $zipName = "irisnote-$version-windows-x64.zip"
         
-        # Create zip with README and LICENSE
         $files = @(
           "target\release\irisnote.exe",
           "README.md",
@@ -68,7 +67,6 @@ jobs:
         }
         
         Compress-Archive -Path $files -DestinationPath $zipName
-        
         echo "ZIP_FILE=$zipName" >> $env:GITHUB_ENV
     
     - name: Upload Release Asset
@@ -77,6 +75,41 @@ jobs:
         files: ${{ env.ZIP_FILE }}
         draft: false
         prerelease: false
+        body: |
+          ## IrisNote ${{ steps.get_version.outputs.VERSION }}
+          
+          ### Changes
+          See [CHANGELOG.md](CHANGELOG.md) for details.
+          
+          ### Installation
+          #### Windows
+          1. Download `irisnote-${{ steps.get_version.outputs.VERSION }}-windows-x64.zip`
+          2. Extract to desired location
+          3. Run `irisnote.exe`
+          
+          #### Linux
+          ```bash
+          tar xzf irisnote-${{ steps.get_version.outputs.VERSION }}-linux-x64.tar.gz
+          ./irisnote
+          ```
+          
+          #### macOS
+          ```bash
+          tar xzf irisnote-${{ steps.get_version.outputs.VERSION }}-macos-x64.tar.gz
+          ./irisnote
+          ```
+          
+          ### Features
+          - 🎯 Smart file type detection (50+ formats)
+          - 👁️ Multi-mode preview (Markdown, SVG, Syntax highlighting)
+          - 📝 Intelligent file naming suggestions
+          - 🔍 Content analysis and summarization
+          - 🎨 Chinese font support
+          - 🔧 Windows file association
+          
+          ---
+          
+          Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/)
 
   build-linux:
     name: Build Linux
@@ -100,7 +133,6 @@ jobs:
         version="${{ steps.get_version.outputs.VERSION }}"
         tarName="irisnote-$version-linux-x64.tar.gz"
         
-        # Create tar with required files
         tar czf $tarName \
           --transform 's,^target/release/,,' \
           target/release/irisnote \
@@ -143,7 +175,6 @@ jobs:
         version="${{ steps.get_version.outputs.VERSION }}"
         tarName="irisnote-$version-macos-x64.tar.gz"
         
-        # Create tar with required files
         tar czf $tarName \
           --transform 's,^target/release/,,' \
           target/release/irisnote \
