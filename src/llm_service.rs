@@ -126,6 +126,10 @@ impl LLMService {
     pub async fn get_config(&self) -> LLMConfig {
         self.config.read().await.clone()
     }
+    
+    pub async fn check_available(&self) -> Option<bool> {
+        Some(self.is_available().await)
+    }
 }
 
 #[derive(Debug, Serialize)]

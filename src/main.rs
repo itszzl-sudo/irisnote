@@ -16,6 +16,9 @@ use crate::config::Config;
 use crate::llm_service::{LLMService, LLMConfig};
 
 fn main() -> eframe::Result<()> {
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let _guard = rt.enter();
+    
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
@@ -39,12 +42,20 @@ struct TextEditor {
     recent_paths: Vec<PathBuf>,
     show_preview: bool,
     message: Option<String>,
+    filename_suggester: Arc<FilenameSuggester>,
+    llm_enabled: bool,
+    llm_available: bool,
+    suggested_filename: Option<String>,
 }
 
 impl TextEditor {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let config = Config::load().unwrap_or_default();
         let recent_paths = config.recent_paths.clone();
+        
+        let llm_config = LLMConfig::default();
+        let llm_enabled = llm_config.enabled;
+        let filename_suggester = Arc::new(FilenameSuggester::with_llm(llm_config));
         
         Self {
             text: String::new(),
@@ -55,6 +66,10 @@ impl TextEditor {
             recent_paths,
             show_preview: false,
             message: None,
+            filename_suggester,
+            llm_enabled,
+            llm_available: false,
+            suggested_filename: None,
         }
     }
     
@@ -118,8 +133,51 @@ impl TextEditor {
         }
     }
     
-    fn get_suggested_filename(&self) -> String {
-        suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type)
+    fn get_suggested_filename(&mut self) -> String {
+        if let Some(ref name) = self.suggested_filename {
+            return name.clone();
+        }
+        
+        let suggester = self.filename_suggester.clone();
+        let text = self.text.clone();
+        let file_path = self.file_path.clone();
+        let file_type = self.file_type.clone();
+        
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+        let filename = rt.block_on(async {
+            suggester.suggest_filename(&text, file_path.as_deref(), &file_type).await
+        });
+        
+        self.suggested_filename = Some(filename.clone());
+        filename
+    }
+    
+    fn check_llm_available(&mut self) {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+        self.llm_available = rt.block_on(async {
+            if let Some(llm) = crate::llm_service::LLMService::new().check_available().await {
+                llm
+            } else {
+                false
+            }
+        });
+    }
+    
+    fn suggest_filename_with_llm(&mut self) {
+        let suggester = self.filename_suggester.clone();
+        let text = self.text.clone();
+        let file_path = self.file_path.clone();
+        let file_type = self.file_type.clone();
+        
+        self.message = Some("正在使用 AI 分析内容...".to_string());
+        
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+        let filename = rt.block_on(async {
+            suggester.suggest_filename(&text, file_path.as_deref(), &file_type).await
+        });
+        
+        self.suggested_filename = Some(filename.clone());
+        self.message = Some(format!("AI 建议文件名: {}", filename));
     }
 }
 
@@ -131,6 +189,7 @@ impl eframe::App for TextEditor {
                     self.text.clear();
                     self.file_path = None;
                     self.file_type = FileType::PlainText;
+                    self.suggested_filename = None;
                     ui.close_menu();
                 }
                 
@@ -185,6 +244,35 @@ impl eframe::App for TextEditor {
                 }
             });
             
+            ui.menu_button("AI", |ui| {
+                ui.checkbox(&mut self.llm_enabled, "启用 AI 智能命名");
+                
+                if self.llm_enabled {
+                    ui.separator();
+                    
+                    if ui.button("检查 LLM 服务").clicked() {
+                        self.check_llm_available();
+                        let status = if self.llm_available { "✅ 可用" } else { "❌ 不可用" };
+                        self.message = Some(format!("LLM 服务状态: {}", status));
+                        ui.close_menu();
+                    }
+                    
+                    if ui.button("AI 分析当前内容").clicked() {
+                        self.suggest_filename_with_llm();
+                        ui.close_menu();
+                    }
+                    
+                    if let Some(ref name) = self.suggested_filename {
+                        ui.separator();
+                        ui.label(format!("建议文件名: {}", name));
+                    }
+                }
+                
+                ui.separator();
+                ui.label(format!("模型: Qwen2.5-Coder-0.5B"));
+                ui.label(format!("服务: localhost:8080"));
+            });
+            
             #[cfg(target_os = "windows")]
             ui.menu_button("工具", |ui| {
                 if ui.button("关联所有支持的文件类型").clicked() {
@@ -208,7 +296,15 @@ impl eframe::App for TextEditor {
         
         if let Some(msg) = &self.message {
             egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-                ui.label(RichText::new(msg).color(Color32::GREEN));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(msg).color(Color32::GREEN));
+                    
+                    if self.llm_enabled {
+                        ui.separator();
+                        let status = if self.llm_available { "🟢 AI" } else { "🔴 AI" };
+                        ui.label(status);
+                    }
+                });
             });
         }
         
@@ -233,6 +329,7 @@ impl eframe::App for TextEditor {
                                 if text != self.text {
                                     self.text = text;
                                     self.update_file_type();
+                                    self.suggested_filename = None;
                                 }
                             });
                         },
@@ -254,6 +351,7 @@ impl eframe::App for TextEditor {
                     if text != self.text {
                         self.text = text;
                         self.update_file_type();
+                        self.suggested_filename = None;
                     }
                 });
             }
