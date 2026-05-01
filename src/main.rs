@@ -109,6 +109,11 @@ impl TextEditor {
     fn update_file_type(&mut self) {
         self.file_type = detect_file_type(&self.text, self.file_path.as_deref());
         self.analyze_content();
+        
+        // Auto-switch to editor for files without preview support
+        if !self.file_type.supports_preview() {
+            self.current_tab = Tab::Editor;
+        }
     }
     
     fn analyze_content(&mut self) {

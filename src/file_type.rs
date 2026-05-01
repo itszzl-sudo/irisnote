@@ -68,6 +68,40 @@ impl FileType {
             _ => None,
         }
     }
+    
+    pub fn supports_preview(&self) -> bool {
+        matches!(
+            self,
+            FileType::Markdown |
+            FileType::SVG |
+            FileType::Image(_) |
+            FileType::Rust |
+            FileType::Python |
+            FileType::JavaScript |
+            FileType::TypeScript |
+            FileType::HTML |
+            FileType::CSS |
+            FileType::JSON |
+            FileType::XML |
+            FileType::YAML |
+            FileType::TOML |
+            FileType::C |
+            FileType::CPP |
+            FileType::Java |
+            FileType::Go |
+            FileType::Kotlin |
+            FileType::Swift |
+            FileType::Ruby |
+            FileType::PHP |
+            FileType::Perl |
+            FileType::Lua |
+            FileType::Shell |
+            FileType::SQL |
+            FileType::Dockerfile |
+            FileType::Makefile |
+            FileType::CMake
+        )
+    }
 }
 
 pub fn get_supported_extensions() -> Vec<String> {
