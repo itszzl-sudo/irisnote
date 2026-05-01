@@ -2,21 +2,30 @@ mod file_type;
 mod preview;
 mod config;
 mod file_association;
+
+#[cfg(feature = "llm")]
 mod llm_service;
 
 use eframe::egui;
 use egui::{Color32, FontId, RichText, Vec2};
 use std::path::PathBuf;
 use std::fs;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use crate::file_type::{detect_file_type, FileType, FilenameSuggester};
-use crate::preview::{PreviewMode, render_preview};
-use crate::config::Config;
+use crate::file_type::{detect_file_type, FileType};
+
+#[cfg(feature = "llm")]
+use crate::file_type::FilenameSuggester;
+
+#[cfg(feature = "llm")]
 use crate::llm_service::{LLMService, LLMConfig};
 
+use crate::preview::{PreviewMode, render_preview};
+use crate::config::Config;
+
 fn main() -> eframe::Result<()> {
+    #[cfg(feature = "llm")]
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    
+    #[cfg(feature = "llm")]
     let _guard = rt.enter();
     
     let options = eframe::NativeOptions {
@@ -42,9 +51,17 @@ struct TextEditor {
     recent_paths: Vec<PathBuf>,
     show_preview: bool,
     message: Option<String>,
-    filename_suggester: Arc<FilenameSuggester>,
+    
+    #[cfg(feature = "llm")]
+    filename_suggester: std::sync::Arc<FilenameSuggester>,
+    
+    #[cfg(feature = "llm")]
     llm_enabled: bool,
+    
+    #[cfg(feature = "llm")]
     llm_available: bool,
+    
+    #[cfg(feature = "llm")]
     suggested_filename: Option<String>,
 }
 
@@ -53,23 +70,40 @@ impl TextEditor {
         let config = Config::load().unwrap_or_default();
         let recent_paths = config.recent_paths.clone();
         
-        let llm_config = LLMConfig::default();
-        let llm_enabled = llm_config.enabled;
-        let filename_suggester = Arc::new(FilenameSuggester::with_llm(llm_config));
+        #[cfg(feature = "llm")]
+        {
+            let llm_config = LLMConfig::default();
+            let llm_enabled = llm_config.enabled;
+            let filename_suggester = std::sync::Arc::new(FilenameSuggester::with_llm(llm_config));
+            
+            Self {
+                text: String::new(),
+                file_path: None,
+                file_type: FileType::PlainText,
+                preview_mode: PreviewMode::Editor,
+                config,
+                recent_paths,
+                show_preview: false,
+                message: None,
+                filename_suggester,
+                llm_enabled,
+                llm_available: false,
+                suggested_filename: None,
+            }
+        }
         
-        Self {
-            text: String::new(),
-            file_path: None,
-            file_type: FileType::PlainText,
-            preview_mode: PreviewMode::Editor,
-            config,
-            recent_paths,
-            show_preview: false,
-            message: None,
-            filename_suggester,
-            llm_enabled,
-            llm_available: false,
-            suggested_filename: None,
+        #[cfg(not(feature = "llm"))]
+        {
+            Self {
+                text: String::new(),
+                file_path: None,
+                file_type: FileType::PlainText,
+                preview_mode: PreviewMode::Editor,
+                config,
+                recent_paths,
+                show_preview: false,
+                message: None,
+            }
         }
     }
     
@@ -133,6 +167,7 @@ impl TextEditor {
         }
     }
     
+    #[cfg(feature = "llm")]
     fn get_suggested_filename(&mut self) -> String {
         if let Some(ref name) = self.suggested_filename {
             return name.clone();
@@ -152,6 +187,12 @@ impl TextEditor {
         filename
     }
     
+    #[cfg(not(feature = "llm"))]
+    fn get_suggested_filename(&mut self) -> String {
+        crate::file_type::suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type)
+    }
+    
+    #[cfg(feature = "llm")]
     fn check_llm_available(&mut self) {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
         self.llm_available = rt.block_on(async {
@@ -163,6 +204,7 @@ impl TextEditor {
         });
     }
     
+    #[cfg(feature = "llm")]
     fn suggest_filename_with_llm(&mut self) {
         let suggester = self.filename_suggester.clone();
         let text = self.text.clone();
@@ -189,7 +231,12 @@ impl eframe::App for TextEditor {
                     self.text.clear();
                     self.file_path = None;
                     self.file_type = FileType::PlainText;
-                    self.suggested_filename = None;
+                    
+                    #[cfg(feature = "llm")]
+                    {
+                        self.suggested_filename = None;
+                    }
+                    
                     ui.close_menu();
                 }
                 
@@ -244,6 +291,7 @@ impl eframe::App for TextEditor {
                 }
             });
             
+            #[cfg(feature = "llm")]
             ui.menu_button("AI", |ui| {
                 ui.checkbox(&mut self.llm_enabled, "启用 AI 智能命名");
                 
@@ -273,6 +321,16 @@ impl eframe::App for TextEditor {
                 ui.label(format!("服务: localhost:8080"));
             });
             
+            #[cfg(not(feature = "llm"))]
+            ui.menu_button("AI", |ui| {
+                ui.label("AI 功能未启用");
+                ui.separator();
+                ui.label("要启用 AI 功能，请使用:");
+                ui.label("cargo build --release --features llm");
+                ui.separator();
+                ui.hyperlink_to("了解更多", "https://github.com/itszzl-sudo/irisnote/blob/master/LLM_SETUP.md");
+            });
+            
             #[cfg(target_os = "windows")]
             ui.menu_button("工具", |ui| {
                 if ui.button("关联所有支持的文件类型").clicked() {
@@ -299,10 +357,17 @@ impl eframe::App for TextEditor {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(msg).color(Color32::GREEN));
                     
+                    #[cfg(feature = "llm")]
                     if self.llm_enabled {
                         ui.separator();
                         let status = if self.llm_available { "🟢 AI" } else { "🔴 AI" };
                         ui.label(status);
+                    }
+                    
+                    #[cfg(not(feature = "llm"))]
+                    {
+                        ui.separator();
+                        ui.label(RichText::new("标准版").color(Color32::GRAY));
                     }
                 });
             });
@@ -329,7 +394,11 @@ impl eframe::App for TextEditor {
                                 if text != self.text {
                                     self.text = text;
                                     self.update_file_type();
-                                    self.suggested_filename = None;
+                                    
+                                    #[cfg(feature = "llm")]
+                                    {
+                                        self.suggested_filename = None;
+                                    }
                                 }
                             });
                         },
@@ -351,7 +420,11 @@ impl eframe::App for TextEditor {
                     if text != self.text {
                         self.text = text;
                         self.update_file_type();
-                        self.suggested_filename = None;
+                        
+                        #[cfg(feature = "llm")]
+                        {
+                            self.suggested_filename = None;
+                        }
                     }
                 });
             }
