@@ -2,14 +2,18 @@ mod file_type;
 mod preview;
 mod config;
 mod file_association;
+mod llm_service;
 
 use eframe::egui;
 use egui::{Color32, FontId, RichText, Vec2};
 use std::path::PathBuf;
 use std::fs;
-use crate::file_type::{detect_file_type, FileType, suggest_filename};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use crate::file_type::{detect_file_type, FileType, FilenameSuggester};
 use crate::preview::{PreviewMode, render_preview};
 use crate::config::Config;
+use crate::llm_service::{LLMService, LLMConfig};
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {

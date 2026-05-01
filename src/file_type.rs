@@ -1,4 +1,7 @@
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use crate::llm_service::{LLMService, LLMConfig};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileType {
@@ -154,18 +157,246 @@ fn detect_from_content(content: &str) -> FileType {
     FileType::PlainText
 }
 
-pub fn suggest_filename(content: &str, path: Option<&Path>, file_type: &FileType) -> String {
-    if let Some(p) = path {
-        if let Some(filename) = p.file_name().and_then(|f| f.to_str()) {
-            return filename.to_string();
+pub struct FilenameSuggester {
+    llm_service: Arc<RwLock<Option<LLMService>>>,
+}
+
+impl FilenameSuggester {
+    pub fn new() -> Self {
+        Self {
+            llm_service: Arc::new(RwLock::new(None)),
         }
     }
     
-    let ext = get_extension_for_type(file_type);
+    pub fn with_llm(llm_config: LLMConfig) -> Self {
+        Self {
+            llm_service: Arc::new(RwLock::new(Some(LLMService::with_config(llm_config)))),
+        }
+    }
     
-    let suggested_name = extract_meaningful_name(content, file_type);
+    pub async fn set_llm_service(&self, config: LLMConfig) {
+        let mut service = self.llm_service.write().await;
+        *service = Some(LLMService::with_config(config));
+    }
     
-    format!("{}.{}", suggested_name, ext)
+    pub async fn suggest_filename(
+        &self,
+        content: &str,
+        path: Option<&Path>,
+        file_type: &FileType,
+    ) -> String {
+        if let Some(p) = path {
+            if let Some(filename) = p.file_name().and_then(|f| f.to_str()) {
+                return filename.to_string();
+            }
+        }
+        
+        let ext = get_extension_for_type(file_type);
+        
+        let suggested_name = self.extract_meaningful_name(content, file_type).await;
+        
+        format!("{}.{}", suggested_name, ext)
+    }
+    
+    async fn extract_meaningful_name(&self, content: &str, file_type: &FileType) -> String {
+        let lines: Vec<&str> = content.lines().take(20).collect();
+        
+        let name = match file_type {
+            FileType::Rust => self.extract_rust_name(&lines),
+            FileType::Python => self.extract_python_name(&lines),
+            FileType::JavaScript | FileType::TypeScript => self.extract_js_name(&lines),
+            FileType::Markdown => self.extract_markdown_name(&lines),
+            FileType::HTML => self.extract_html_name(content),
+            FileType::Go => self.extract_go_name(&lines),
+            FileType::Java => self.extract_java_name(&lines),
+            FileType::C | FileType::CPP => self.extract_c_name(&lines),
+            FileType::JSON => self.extract_json_name(content),
+            FileType::TOML => self.extract_toml_name(&lines),
+            _ => None,
+        };
+        
+        if let Some(n) = name {
+            return n;
+        }
+        
+        if content.len() > 50 {
+            if let Some(llm) = self.llm_service.read().await.as_ref() {
+                if llm.is_available().await {
+                    match llm.summarize_content(content).await {
+                        Ok(title) => {
+                            if !title.is_empty() && title != "untitled" {
+                                return title;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("LLM 总结失败: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        "untitled".to_string()
+    }
+    
+    fn extract_rust_name(&self, lines: &[&str]) -> Option<String> {
+        for line in lines {
+            if line.starts_with("fn ") {
+                if let Some(name) = line.strip_prefix("fn ") {
+                    let name = name.split('(').next().unwrap_or("main");
+                    return Some(sanitize_name(name));
+                }
+            }
+            if line.starts_with("mod ") {
+                if let Some(name) = line.strip_prefix("mod ") {
+                    let name = name.trim().trim_end_matches(';');
+                    return Some(sanitize_name(name));
+                }
+            }
+        }
+        None
+    }
+    
+    fn extract_python_name(&self, lines: &[&str]) -> Option<String> {
+        for line in lines {
+            if line.starts_with("def ") {
+                if let Some(name) = line.strip_prefix("def ") {
+                    let name = name.split('(').next().unwrap_or("main");
+                    return Some(sanitize_name(name));
+                }
+            }
+            if line.starts_with("class ") {
+                if let Some(name) = line.strip_prefix("class ") {
+                    let name = name.split(':').next().unwrap_or("MyClass");
+                    return Some(sanitize_name(name));
+                }
+            }
+        }
+        None
+    }
+    
+    fn extract_js_name(&self, lines: &[&str]) -> Option<String> {
+        for line in lines {
+            if line.starts_with("function ") {
+                if let Some(name) = line.strip_prefix("function ") {
+                    let name = name.split('(').next().unwrap_or("main");
+                    return Some(sanitize_name(name));
+                }
+            }
+            if line.contains("const ") && line.contains(" = ") {
+                for part in line.split("const ") {
+                    if part.contains(" = ") {
+                        let name = part.split(" = ").next().unwrap_or("main");
+                        return Some(sanitize_name(name.trim()));
+                    }
+                }
+            }
+        }
+        None
+    }
+    
+    fn extract_markdown_name(&self, lines: &[&str]) -> Option<String> {
+        for line in lines {
+            if line.starts_with("# ") {
+                if let Some(title) = line.strip_prefix("# ") {
+                    return Some(sanitize_name(title));
+                }
+            }
+        }
+        None
+    }
+    
+    fn extract_html_name(&self, content: &str) -> Option<String> {
+        if content.contains("<title>") {
+            if let Some(start) = content.find("<title>") {
+                if let Some(end) = content.find("</title>") {
+                    if end > start {
+                        let title = &content[start + 7..end];
+                        return Some(sanitize_name(title));
+                    }
+                }
+            }
+        }
+        None
+    }
+    
+    fn extract_go_name(&self, lines: &[&str]) -> Option<String> {
+        for line in lines {
+            if line.starts_with("func ") {
+                if let Some(name) = line.strip_prefix("func ") {
+                    let name = name.split('(').next().unwrap_or("main");
+                    return Some(sanitize_name(name));
+                }
+            }
+        }
+        None
+    }
+    
+    fn extract_java_name(&self, lines: &[&str]) -> Option<String> {
+        for line in lines {
+            if line.contains("class ") {
+                for part in line.split("class ") {
+                    if !part.is_empty() {
+                        let name = part.split_whitespace().next().unwrap_or("Main");
+                        return Some(sanitize_name(name));
+                    }
+                }
+            }
+        }
+        None
+    }
+    
+    fn extract_c_name(&self, lines: &[&str]) -> Option<String> {
+        for line in lines {
+            if line.starts_with("int ") && line.contains("main") {
+                return Some("main".to_string());
+            }
+        }
+        None
+    }
+    
+    fn extract_json_name(&self, content: &str) -> Option<String> {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
+            if let Some(obj) = json.as_object() {
+                if obj.contains_key("name") {
+                    if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+                        return Some(sanitize_name(name));
+                    }
+                }
+                if obj.contains_key("package") {
+                    if let Some(name) = obj.get("package").and_then(|v| v.as_str()) {
+                        return Some(sanitize_name(name));
+                    }
+                }
+            }
+        }
+        None
+    }
+    
+    fn extract_toml_name(&self, lines: &[&str]) -> Option<String> {
+        for line in lines {
+            if line.starts_with("name = ") {
+                if let Some(name) = line.strip_prefix("name = ") {
+                    return Some(sanitize_name(name.trim_matches('"')));
+                }
+            }
+        }
+        None
+    }
+}
+
+fn sanitize_name(name: &str) -> String {
+    let name = name.trim();
+    let sanitized: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    
+    if sanitized.is_empty() {
+        "untitled".to_string()
+    } else {
+        sanitized.to_lowercase()
+    }
 }
 
 fn get_extension_for_type(file_type: &FileType) -> &'static str {
@@ -191,6 +422,20 @@ fn get_extension_for_type(file_type: &FileType) -> &'static str {
     }
 }
 
+pub fn suggest_filename(content: &str, path: Option<&Path>, file_type: &FileType) -> String {
+    if let Some(p) = path {
+        if let Some(filename) = p.file_name().and_then(|f| f.to_str()) {
+            return filename.to_string();
+        }
+    }
+    
+    let ext = get_extension_for_type(file_type);
+    
+    let suggested_name = extract_meaningful_name(content, file_type);
+    
+    format!("{}.{}", suggested_name, ext)
+}
+
 fn extract_meaningful_name(content: &str, file_type: &FileType) -> String {
     let lines: Vec<&str> = content.lines().take(20).collect();
     
@@ -200,12 +445,6 @@ fn extract_meaningful_name(content: &str, file_type: &FileType) -> String {
                 if line.starts_with("fn ") {
                     if let Some(name) = line.strip_prefix("fn ") {
                         let name = name.split('(').next().unwrap_or("main");
-                        return sanitize_name(name);
-                    }
-                }
-                if line.starts_with("mod ") {
-                    if let Some(name) = line.strip_prefix("mod ") {
-                        let name = name.trim().trim_end_matches(';');
                         return sanitize_name(name);
                     }
                 }
@@ -220,130 +459,9 @@ fn extract_meaningful_name(content: &str, file_type: &FileType) -> String {
                         return sanitize_name(name);
                     }
                 }
-                if line.starts_with("class ") {
-                    if let Some(name) = line.strip_prefix("class ") {
-                        let name = name.split(':').next().unwrap_or("MyClass");
-                        return sanitize_name(name);
-                    }
-                }
             }
             "main".to_string()
-        }
-        FileType::JavaScript | FileType::TypeScript => {
-            for line in &lines {
-                if line.starts_with("function ") {
-                    if let Some(name) = line.strip_prefix("function ") {
-                        let name = name.split('(').next().unwrap_or("main");
-                        return sanitize_name(name);
-                    }
-                }
-                if line.contains("const ") && line.contains(" = ") {
-                    for part in line.split("const ") {
-                        if part.contains(" = ") {
-                            let name = part.split(" = ").next().unwrap_or("main");
-                            return sanitize_name(name.trim());
-                        }
-                    }
-                }
-            }
-            "index".to_string()
-        }
-        FileType::Markdown => {
-            for line in &lines {
-                if line.starts_with("# ") {
-                    if let Some(title) = line.strip_prefix("# ") {
-                        return sanitize_name(title);
-                    }
-                }
-            }
-            "document".to_string()
-        }
-        FileType::HTML => {
-            if content.contains("<title>") {
-                if let Some(start) = content.find("<title>") {
-                    if let Some(end) = content.find("</title>") {
-                        if end > start {
-                            let title = &content[start + 7..end];
-                            return sanitize_name(title);
-                        }
-                    }
-                }
-            }
-            "index".to_string()
-        }
-        FileType::Go => {
-            for line in &lines {
-                if line.starts_with("func ") {
-                    if let Some(name) = line.strip_prefix("func ") {
-                        let name = name.split('(').next().unwrap_or("main");
-                        return sanitize_name(name);
-                    }
-                }
-            }
-            "main".to_string()
-        }
-        FileType::Java => {
-            for line in &lines {
-                if line.contains("class ") {
-                    for part in line.split("class ") {
-                        if !part.is_empty() {
-                            let name = part.split_whitespace().next().unwrap_or("Main");
-                            return sanitize_name(name);
-                        }
-                    }
-                }
-            }
-            "Main".to_string()
-        }
-        FileType::C | FileType::CPP => {
-            for line in &lines {
-                if line.starts_with("int ") && line.contains("main") {
-                    return "main".to_string();
-                }
-            }
-            "program".to_string()
-        }
-        FileType::JSON => {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
-                if let Some(obj) = json.as_object() {
-                    if obj.contains_key("name") {
-                        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
-                            return sanitize_name(name);
-                        }
-                    }
-                    if obj.contains_key("package") {
-                        if let Some(name) = obj.get("package").and_then(|v| v.as_str()) {
-                            return sanitize_name(name);
-                        }
-                    }
-                }
-            }
-            "data".to_string()
-        }
-        FileType::TOML => {
-            for line in &lines {
-                if line.starts_with("name = ") {
-                    if let Some(name) = line.strip_prefix("name = ") {
-                        return sanitize_name(name.trim_matches('"'));
-                    }
-                }
-            }
-            "config".to_string()
         }
         _ => "untitled".to_string(),
-    }
-}
-
-fn sanitize_name(name: &str) -> String {
-    let name = name.trim();
-    let sanitized: String = name
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-        .collect();
-    
-    if sanitized.is_empty() {
-        "untitled".to_string()
-    } else {
-        sanitized.to_lowercase()
     }
 }
