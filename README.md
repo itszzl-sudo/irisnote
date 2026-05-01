@@ -6,7 +6,29 @@
 
 A smart text editor built with Rust that features automatic file type detection, intelligent file naming, and multi-mode preview capabilities.
 
-**[中文文档](README_CN.md)**
+**[中文文档](README_CN.md)** | **[📥 Download](https://itszzl-sudo.github.io/irisnote/)**
+
+## 📥 Installation
+
+### Quick Download
+Visit the **[Download Page](https://itszzl-sudo.github.io/irisnote/)** for all platforms.
+
+### Latest Release
+Download from [GitHub Releases](https://github.com/itszzl-sudo/irisnote/releases/latest):
+- **Windows**: `irisnote-v0.1.1-windows-x64.zip`
+- **Linux**: `irisnote-v0.1.1-linux-x64.tar.gz`
+- **macOS**: `irisnote-v0.1.1-macos-x64.tar.gz`
+
+### Install
+```bash
+# Windows
+unzip irisnote-v0.1.1-windows-x64.zip
+irisnote.exe
+
+# Linux/macOS
+tar xzf irisnote-v0.1.1-*.tar.gz
+./irisnote
+```
 
 ## ✨ Features
 
