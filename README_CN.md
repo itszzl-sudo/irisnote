@@ -82,15 +82,27 @@ cargo build
 #### Release 版本（优化编译，用于生产）
 
 ```bash
-cd smart-text-editor
+cd irisnote
 cargo build --release
-./target/release/smart-text-editor  # Linux/macOS
-.\target\release\smart-text-editor.exe  # Windows
+./target/release/irisnote  # Linux/macOS
+.\target\release\irisnote.exe  # Windows
 ```
 
-### Windows 自签名
+### Windows 签名
 
-运行提供的批处理文件：
+**方式 1: Signpath（推荐用于发布）**
+
+IrisNote 使用 Signpath 免费代码签名服务进行专业签名。
+
+```bash
+# GitHub Actions 自动使用 Signpath
+# 本地签名需先配置 Signpath:
+# 参考 SIGNPATH_SETUP.md
+
+.\build-and-sign-signpath.bat
+```
+
+**方式 2: 自签名（开发使用）**
 
 ```bash
 .\build-and-sign.bat

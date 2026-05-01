@@ -2,9 +2,9 @@ name: Build and Test
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ master, main, develop ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ master, main, develop ]
 
 jobs:
   test:
@@ -13,16 +13,14 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
-        rust: [stable, beta]
+        rust: [stable]
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Install Rust
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: ${{ matrix.rust }}
-        override: true
         components: rustfmt, clippy
     
     - name: Check formatting
@@ -37,7 +35,7 @@ jobs:
     - name: Run tests
       run: cargo test --verbose
 
-  build-release:
+  build:
     name: Build Release
     runs-on: ${{ matrix.os }}
     strategy:
@@ -45,34 +43,31 @@ jobs:
         os: [ubuntu-latest, windows-latest, macOS-latest]
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
+      uses: dtolnay/rust-toolchain@stable
     
     - name: Build Release
       run: cargo build --release --verbose
     
     - name: Upload Artifact (Windows)
       if: matrix.os == 'windows-latest'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: smart-text-editor-windows
-        path: target/release/smart-text-editor.exe
+        name: irisnote-windows
+        path: target/release/irisnote.exe
     
     - name: Upload Artifact (Linux)
       if: matrix.os == 'ubuntu-latest'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: smart-text-editor-linux
-        path: target/release/smart-text-editor
+        name: irisnote-linux
+        path: target/release/irisnote
     
     - name: Upload Artifact (macOS)
       if: matrix.os == 'macOS-latest'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: smart-text-editor-macos
-        path: target/release/smart-text-editor
+        name: irisnote-macos
+        path: target/release/irisnote

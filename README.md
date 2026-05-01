@@ -90,9 +90,21 @@ cargo build --release
 .\target\release\irisnote.exe  # Windows
 ```
 
-### Windows Self-Signing
+### Windows Signing
 
-Run the provided batch file:
+**Option 1: Signpath (Recommended for Release)**
+
+IrisNote uses Signpath free code signing service for professional signing.
+
+```bash
+# Signpath is automatically used in GitHub Actions
+# For local signing, configure Signpath first:
+# See SIGNPATH_SETUP.md for details
+
+.\build-and-sign-signpath.bat
+```
+
+**Option 2: Self-Signing (Development)**
 
 ```bash
 .\build-and-sign.bat

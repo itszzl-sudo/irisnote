@@ -1,0 +1,140 @@
+name: Release with Signpath
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-sign:
+    name: Build and Sign
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Build Release
+      run: cargo build --release --verbose
+    
+    - name: Sign with Signpath
+      id: signpath
+      uses: signpath/github-action@v1
+      with:
+        api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+        organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+        project-slug: irisnote
+        signing-policy-slug: release-signing
+        artifacts: target/release/irisnote.exe
+        output-artifact-directory: signed
+      continue-on-error: true
+    
+    - name: Use signed artifact
+      if: steps.signpath.outcome == 'success'
+      run: |
+        Move-Item signed\irisnote.exe target\release\irisnote.exe -Force
+        echo "✅ Artifact signed successfully"
+    
+    - name: Fallback to unsigned
+      if: steps.signpath.outcome != 'success'
+      run: |
+        echo "⚠️ Signing failed or not configured, using unsigned artifact"
+        echo "To enable signing, configure Signpath secrets"
+    
+    - name: Get version
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      shell: bash
+    
+    - name: Create distribution package
+      run: |
+        $version = "${{ steps.get_version.outputs.VERSION }}"
+        $zipName = "irisnote-$version-windows-x64.zip"
+        
+        # Create zip with README and LICENSE
+        Compress-Archive -Path `
+          target\release\irisnote.exe,`
+          README.md,`
+          README_CN.md,`
+          LICENSE,`
+          NOTICE `
+          -DestinationPath $zipName
+        
+        echo "ZIP_FILE=$zipName" >> $env:GITHUB_ENV
+    
+    - name: Upload Release Asset
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ env.ZIP_FILE }}
+        draft: false
+        prerelease: false
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Build Release
+      run: cargo build --release --verbose
+    
+    - name: Get version
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    
+    - name: Create distribution package
+      run: |
+        version="${{ steps.get_version.outputs.VERSION }}"
+        tarName="irisnote-$version-linux-x64.tar.gz"
+        
+        tar czf $tarName \
+          -C target/release irisnote \
+          -C $PWD README.md README_CN.md LICENSE NOTICE
+        
+        echo "TAR_FILE=$tarName" >> $GITHUB_ENV
+    
+    - name: Upload Release Asset
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ env.TAR_FILE }}
+
+  build-macos:
+    name: Build macOS
+    runs-on: macOS-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Build Release
+      run: cargo build --release --verbose
+    
+    - name: Get version
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    
+    - name: Create distribution package
+      run: |
+        version="${{ steps.get_version.outputs.VERSION }}"
+        tarName="irisnote-$version-macos-x64.tar.gz"
+        
+        tar czf $tarName \
+          -C target/release irisnote \
+          -C $PWD README.md README_CN.md LICENSE NOTICE
+        
+        echo "TAR_FILE=$tarName" >> $GITHUB_ENV
+    
+    - name: Upload Release Asset
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ env.TAR_FILE }}
