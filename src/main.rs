@@ -3,8 +3,6 @@ mod preview;
 mod config;
 mod file_association;
 mod syntax_highlight;
-
-#[cfg(feature = "bitnet")]
 mod bitnet_service;
 
 use eframe::egui;
@@ -14,8 +12,6 @@ use std::fs;
 use crate::file_type::{detect_file_type, FileType, suggest_filename};
 use crate::preview::{PreviewMode, render_preview};
 use crate::config::Config;
-
-#[cfg(feature = "bitnet")]
 use crate::bitnet_service::{BitNetService, BitNetConfig};
 
 fn main() -> eframe::Result<()> {
@@ -61,76 +57,145 @@ fn setup_fonts(ctx: &egui::Context) {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Tab {
+    Editor,
+    Preview,
+}
+
 struct TextEditor {
     text: String,
     file_path: Option<PathBuf>,
     file_type: FileType,
-    preview_mode: PreviewMode,
     config: Config,
     recent_paths: Vec<PathBuf>,
-    show_preview: bool,
     message: Option<String>,
     
-    #[cfg(feature = "bitnet")]
-    bitnet_service: std::sync::Arc<BitNetService>,
-    
-    #[cfg(feature = "bitnet")]
-    bitnet_enabled: bool,
-    
-    #[cfg(feature = "bitnet")]
+    current_tab: Tab,
+    show_summary: bool,
+    summary: Option<String>,
     suggested_filename: Option<String>,
+    
+    bitnet_service: std::sync::Arc<BitNetService>,
 }
 
 impl TextEditor {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let config = Config::load().unwrap_or_default();
         let recent_paths = config.recent_paths.clone();
+        let bitnet_config = BitNetConfig::default();
+        let bitnet_service = std::sync::Arc::new(BitNetService::with_config(bitnet_config));
         
-        #[cfg(feature = "bitnet")]
-        {
-            let bitnet_config = BitNetConfig::default();
-            let bitnet_enabled = bitnet_config.enabled;
-            let bitnet_service = std::sync::Arc::new(BitNetService::with_config(bitnet_config));
-            
-            Self {
-                text: String::new(),
-                file_path: None,
-                file_type: FileType::PlainText,
-                preview_mode: PreviewMode::Editor,
-                config,
-                recent_paths,
-                show_preview: false,
-                message: None,
-                bitnet_service,
-                bitnet_enabled,
-                suggested_filename: None,
-            }
-        }
-        
-        #[cfg(not(feature = "bitnet"))]
-        {
-            Self {
-                text: String::new(),
-                file_path: None,
-                file_type: FileType::PlainText,
-                preview_mode: PreviewMode::Editor,
-                config,
-                recent_paths,
-                show_preview: false,
-                message: None,
-            }
+        Self {
+            text: String::new(),
+            file_path: None,
+            file_type: FileType::PlainText,
+            config,
+            recent_paths,
+            message: None,
+            current_tab: Tab::Preview,
+            show_summary: true,
+            summary: None,
+            suggested_filename: None,
+            bitnet_service,
         }
     }
     
     fn update_file_type(&mut self) {
         self.file_type = detect_file_type(&self.text, self.file_path.as_deref());
-        self.preview_mode = match self.file_type {
-            FileType::Markdown => PreviewMode::Markdown,
-            FileType::SVG => PreviewMode::Image,
-            FileType::JSON | FileType::XML => PreviewMode::Highlighted,
-            FileType::Image(_) => PreviewMode::Image,
-            _ => PreviewMode::Editor,
-        };
+        self.analyze_content();
+    }
+    
+    fn analyze_content(&mut self) {
+        if self.text.is_empty() {
+            self.summary = None;
+            self.suggested_filename = None;
+            return;
+        }
+        
+        let suggested = suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type);
+        self.suggested_filename = Some(suggested);
+        
+        match self.bitnet_service.summarize_content(&self.text) {
+            Ok(summary) if summary != "untitled" => {
+                self.summary = Some(summary);
+            }
+            _ => {
+                self.summary = self.generate_summary();
+            }
+        }
+    }
+    
+    fn generate_summary(&self) -> Option<String> {
+        let lines: Vec<&str> = self.text.lines().take(50).collect();
+        
+        match &self.file_type {
+            FileType::Rust | FileType::Python | FileType::JavaScript | 
+            FileType::TypeScript | FileType::Java | FileType::Go | 
+            FileType::C | FileType::CPP | FileType::Kotlin | FileType::Swift |
+            FileType::Ruby | FileType::PHP | FileType::Perl | FileType::Lua |
+            FileType::Shell | FileType::PowerShell => {
+                for line in &lines {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("//") || trimmed.starts_with("#") || 
+                       trimmed.starts_with("/*") || trimmed.starts_with("--") {
+                        let comment = trimmed.trim_start_matches('/').trim_start_matches('#')
+                                            .trim_start_matches('*').trim_start_matches('-').trim();
+                        if !comment.is_empty() && comment.len() > 10 {
+                            return Some(format!("用法: {}", comment));
+                        }
+                    }
+                }
+                
+                let first_line = lines.first()?.trim();
+                if first_line.starts_with("fn ") || first_line.starts_with("def ") ||
+                   first_line.starts_with("function ") || first_line.starts_with("func ") {
+                    return Some(format!("目标: {}", first_line));
+                }
+                
+                Some("代码文件".to_string())
+            }
+            FileType::SQL => {
+                for line in &lines {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("--") {
+                        let comment = trimmed.trim_start_matches('-').trim();
+                        if !comment.is_empty() {
+                            return Some(format!("查询: {}", comment));
+                        }
+                    }
+                }
+                Some("SQL 脚本".to_string())
+            }
+            FileType::HTML | FileType::CSS => {
+                if self.text.contains("<title>") {
+                    if let Some(start) = self.text.find("<title>") {
+                        if let Some(end) = self.text.find("</title>") {
+                            if end > start {
+                                return Some(format!("页面: {}", &self.text[start+7..end]));
+                            }
+                        }
+                    }
+                }
+                Some("网页文件".to_string())
+            }
+            FileType::Markdown => {
+                for line in &lines {
+                    if line.starts_with("# ") {
+                        return Some(format!("文档: {}", line.strip_prefix("# ").unwrap_or("")));
+                    }
+                }
+                Some("Markdown 文档".to_string())
+            }
+            FileType::Dockerfile => Some("Docker 构建配置".to_string()),
+            FileType::Makefile => Some("Make 构建脚本".to_string()),
+            FileType::CMake => Some("CMake 构建配置".to_string()),
+            _ => {
+                let word_count = self.text.split_whitespace().count();
+                let line_count = self.text.lines().count();
+                Some(format!("{} 行, {} 词", line_count, word_count))
+            }
+        }
     }
     
     fn save_file(&mut self) {
@@ -182,90 +247,21 @@ impl TextEditor {
         }
     }
     
-    #[cfg(feature = "bitnet")]
-    fn get_suggested_filename(&mut self) -> String {
+    fn get_suggested_filename(&self) -> String {
         if let Some(ref name) = self.suggested_filename {
-            return name.clone();
+            name.clone()
+        } else {
+            suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type)
         }
-        
-        let traditional_name = suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type);
-        
-        if traditional_name != "untitled.txt" && !traditional_name.starts_with("untitled.") {
-            return traditional_name;
-        }
-        
-        if self.bitnet_enabled {
-            match self.bitnet_service.summarize_content(&self.text) {
-                Ok(summary) if summary != "untitled" => {
-                    let ext = self.get_extension();
-                    let filename = format!("{}.{}", summary, ext);
-                    self.suggested_filename = Some(filename.clone());
-                    return filename;
-                }
-                _ => {}
-            }
-        }
-        
-        traditional_name
     }
     
-    #[cfg(not(feature = "bitnet"))]
-    fn get_suggested_filename(&mut self) -> String {
-        suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type)
-    }
-    
-    #[cfg(feature = "bitnet")]
-    fn get_extension(&self) -> String {
+    fn get_preview_mode(&self) -> PreviewMode {
         match &self.file_type {
-            FileType::PlainText => "txt".to_string(),
-            FileType::Markdown => "md".to_string(),
-            FileType::Rust => "rs".to_string(),
-            FileType::Python => "py".to_string(),
-            FileType::JavaScript => "js".to_string(),
-            FileType::TypeScript => "ts".to_string(),
-            FileType::HTML => "html".to_string(),
-            FileType::CSS => "css".to_string(),
-            FileType::JSON => "json".to_string(),
-            FileType::XML => "xml".to_string(),
-            FileType::YAML => "yaml".to_string(),
-            FileType::TOML => "toml".to_string(),
-            FileType::SVG => "svg".to_string(),
-            FileType::Image(ext) => ext.clone(),
-            FileType::C => "c".to_string(),
-            FileType::CPP => "cpp".to_string(),
-            FileType::Java => "java".to_string(),
-            FileType::Go => "go".to_string(),
-            FileType::Kotlin => "kt".to_string(),
-            FileType::Swift => "swift".to_string(),
-            FileType::Ruby => "rb".to_string(),
-            FileType::PHP => "php".to_string(),
-            FileType::Perl => "pl".to_string(),
-            FileType::Lua => "lua".to_string(),
-            FileType::Shell => "sh".to_string(),
-            FileType::PowerShell => "ps1".to_string(),
-            FileType::SQL => "sql".to_string(),
-            FileType::Dockerfile => "Dockerfile".to_string(),
-            FileType::Makefile => "Makefile".to_string(),
-            FileType::CMake => "cmake".to_string(),
-            FileType::Config => "cfg".to_string(),
-            FileType::Unknown(ext) => ext.clone(),
-        }
-    }
-    
-    #[cfg(feature = "bitnet")]
-    fn summarize_with_bitnet(&mut self) {
-        self.message = Some("正在分析内容...".to_string());
-        
-        match self.bitnet_service.summarize_content(&self.text) {
-            Ok(summary) => {
-                let ext = self.get_extension();
-                let filename = format!("{}.{}", summary, ext);
-                self.suggested_filename = Some(filename.clone());
-                self.message = Some(format!("建议文件名: {}", filename));
-            }
-            Err(e) => {
-                self.message = Some(format!("分析失败: {}", e));
-            }
+            FileType::Markdown => PreviewMode::Markdown,
+            FileType::SVG => PreviewMode::Image,
+            FileType::Image(_) => PreviewMode::Image,
+            _ if self.file_type.to_syntax_name().is_some() => PreviewMode::Highlighted,
+            _ => PreviewMode::Editor,
         }
     }
 }
@@ -279,12 +275,8 @@ impl eframe::App for TextEditor {
                         self.text.clear();
                         self.file_path = None;
                         self.file_type = FileType::PlainText;
-                        
-                        #[cfg(feature = "bitnet")]
-                        {
-                            self.suggested_filename = None;
-                        }
-                        
+                        self.summary = None;
+                        self.suggested_filename = None;
                         ui.close_menu();
                     }
                     
@@ -305,6 +297,8 @@ impl eframe::App for TextEditor {
                         }
                     });
                     
+                    ui.separator();
+                    
                     if ui.button("保存").clicked() {
                         self.save_file();
                         ui.close_menu();
@@ -322,146 +316,95 @@ impl eframe::App for TextEditor {
                     }
                 });
                 
-                ui.menu_button("视图", |ui| {
-                    ui.checkbox(&mut self.show_preview, "显示预览");
-                    ui.separator();
-                    
-                    if ui.radio_value(&mut self.preview_mode, PreviewMode::Editor, "编辑器").clicked() {
-                        ui.close_menu();
-                    }
-                    if ui.radio_value(&mut self.preview_mode, PreviewMode::Markdown, "Markdown 预览").clicked() {
-                        ui.close_menu();
-                    }
-                    if ui.radio_value(&mut self.preview_mode, PreviewMode::Image, "图片预览").clicked() {
-                        ui.close_menu();
-                    }
-                    if ui.radio_value(&mut self.preview_mode, PreviewMode::Highlighted, "语法高亮").clicked() {
-                        ui.close_menu();
-                    }
-                });
-                
-                #[cfg(feature = "bitnet")]
-                ui.menu_button("智能分析", |ui| {
-                    ui.checkbox(&mut self.bitnet_enabled, "启用智能命名");
-                    
-                    if self.bitnet_enabled {
-                        ui.separator();
-                        
-                        if ui.button("分析当前内容").clicked() {
-                            self.summarize_with_bitnet();
-                            ui.close_menu();
-                        }
-                        
-                        if let Some(ref name) = self.suggested_filename {
-                            ui.separator();
-                            ui.label(format!("建议文件名: {}", name));
-                        }
-                    }
-                    
-                    ui.separator();
-                    ui.label("基于关键词提取");
-                    ui.label("无需外部依赖");
-                });
-                
-                #[cfg(not(feature = "bitnet"))]
-                ui.menu_button("智能分析", |ui| {
-                    ui.label("智能分析未启用");
-                    ui.separator();
-                    ui.label("要启用请使用:");
-                    ui.label("cargo build --features bitnet");
-                });
-                
                 #[cfg(target_os = "windows")]
                 ui.menu_button("工具", |ui| {
-                    if ui.button("关联所有支持的文件类型").clicked() {
+                    if ui.button("关联文件类型").clicked() {
                         file_association::register_all_extensions();
                         self.message = Some("文件关联已注册".to_string());
                         ui.close_menu();
                     }
+                });
+                
+                ui.menu_button("帮助", |ui| {
+                    if ui.button("关于 IrisNote").clicked() {
+                        ui.close_menu();
+                    }
                     
-                    ui.menu_button("选择性关联", |ui| {
-                        let extensions = file_type::get_supported_extensions();
-                        for ext in extensions {
-                            if ui.button(format!(".{}", ext)).clicked() {
-                                file_association::register_extension(&ext);
-                                self.message = Some(format!(".{} 已关联", ext));
-                                ui.close_menu();
-                            }
+                    ui.separator();
+                    ui.label("IrisNote v0.1.0");
+                    ui.label("智能文本编辑器");
+                    ui.label("支持 50+ 文件类型");
+                    ui.label("语法高亮 | 预览 | 智能分析");
+                    
+                    ui.separator();
+                    ui.hyperlink_to("GitHub", "https://github.com/itszzl-sudo/irisnote");
+                });
+                
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("⚙").clicked() {
+                        self.show_summary = !self.show_summary;
+                    }
+                });
+            });
+        });
+        
+        if self.show_summary && (self.summary.is_some() || self.suggested_filename.is_some()) {
+            egui::TopBottomPanel::top("summary_bar")
+                .resizable(false)
+                .show_separator_line(false)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        if let Some(ref summary) = self.summary {
+                            ui.label(RichText::new("📝 ").color(Color32::LIGHT_BLUE));
+                            ui.label(RichText::new(summary).color(Color32::LIGHT_GRAY));
+                            ui.separator();
+                        }
+                        
+                        if let Some(ref filename) = self.suggested_filename {
+                            ui.label(RichText::new("📁 ").color(Color32::LIGHT_GREEN));
+                            ui.label(RichText::new(format!("建议: {}", filename)).color(Color32::LIGHT_GRAY));
                         }
                     });
                 });
+        }
+        
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.current_tab, Tab::Editor, "编辑器");
+                ui.selectable_value(&mut self.current_tab, Tab::Preview, "预览");
             });
+            ui.separator();
+            
+            match self.current_tab {
+                Tab::Editor => {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        let mut text = self.text.clone();
+                        let available = ui.available_size();
+                        ui.add(
+                            egui::TextEdit::multiline(&mut text)
+                                .desired_width(available.x - 10.0)
+                                .desired_rows(40)
+                                .font(FontId::monospace(14.0))
+                        );
+                        if text != self.text {
+                            self.text = text;
+                            self.update_file_type();
+                        }
+                    });
+                }
+                Tab::Preview => {
+                    let preview_mode = self.get_preview_mode();
+                    render_preview(ui, &self.text, &self.file_type, &preview_mode);
+                }
+            }
         });
         
         if let Some(msg) = &self.message {
             egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(msg).color(Color32::GREEN));
-                    
-                    #[cfg(feature = "bitnet")]
-                    if self.bitnet_enabled {
-                        ui.separator();
-                        ui.label(RichText::new("智能分析已启用").color(Color32::LIGHT_BLUE));
-                    }
                 });
             });
         }
-        
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let available = ui.available_size();
-            
-            if self.show_preview && self.preview_mode != PreviewMode::Editor {
-                ui.horizontal(|ui| {
-                    let editor_width = available.x * 0.5;
-                    
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(editor_width, available.y),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                let mut text = self.text.clone();
-                                ui.add(
-                                    egui::TextEdit::multiline(&mut text)
-                                        .desired_width(editor_width - 10.0)
-                                        .desired_rows(30)
-                                );
-                                if text != self.text {
-                                    self.text = text;
-                                    self.update_file_type();
-                                    
-                                    #[cfg(feature = "bitnet")]
-                                    {
-                                        self.suggested_filename = None;
-                                    }
-                                }
-                            });
-                        },
-                    );
-                    
-                    ui.separator();
-                    
-                    render_preview(ui, &self.text, &self.file_type, &self.preview_mode);
-                });
-            } else {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let mut text = self.text.clone();
-                    ui.add(
-                        egui::TextEdit::multiline(&mut text)
-                            .desired_width(available.x - 10.0)
-                            .desired_rows(40)
-                            .font(FontId::monospace(14.0))
-                    );
-                    if text != self.text {
-                        self.text = text;
-                        self.update_file_type();
-                        
-                        #[cfg(feature = "bitnet")]
-                        {
-                            self.suggested_filename = None;
-                        }
-                    }
-                });
-            }
-        });
     }
 }

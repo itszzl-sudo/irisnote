@@ -2,86 +2,64 @@
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("standard", "bitnet", "all", "clean", "help")]
-    [string]$Command = "standard"
+    [ValidateSet("release", "debug", "clean", "help")]
+    [string]$Command = "release"
 )
 
 function Show-Help {
     Write-Host @"
-IrisNote 构建脚本
+IrisNote 构建脚本 (BitNet 增强版)
 
 用法:
     .\build.ps1 [命令]
 
 命令:
-    standard    构建标准版（默认）
-    bitnet      构建 BitNet 增强版
-    all         构建所有版本
+    release     构建发布版（默认，包含 BitNet）
+    debug       构建调试版（包含 BitNet）
     clean       清理构建产物
     help        显示帮助信息
 
 示例:
-    .\build.ps1              # 构建标准版
-    .\build.ps1 standard     # 构建标准版
-    .\build.ps1 bitnet       # 构建 BitNet 增强版
-    .\build.ps1 all          # 构建所有版本
+    .\build.ps1              # 构建发布版
+    .\build.ps1 release      # 构建发布版
+    .\build.ps1 debug        # 构建调试版
     .\build.ps1 clean        # 清理构建产物
 
-版本说明:
-    标准版: ~15 MB, 基础功能
-    BitNet 版: ~20 MB, 增强智能分析
+特性:
+    BitNet 智能分析（默认启用）
+    - 文件名建议
+    - 内容摘要生成
+    - 关键词提取
 
 "@
 }
 
-function Build-Standard {
-    Write-Host "====================================" -ForegroundColor Cyan
-    Write-Host "  构建标准版" -ForegroundColor Cyan
-    Write-Host "====================================" -ForegroundColor Cyan
-    Write-Host ""
+function Build-Release {
+    Write-Host "构建 IrisNote 发布版（BitNet 增强版）..." -ForegroundColor Cyan
     
-    Write-Host "编译中..." -ForegroundColor Green
     cargo build --release
     
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "× 构建失败" -ForegroundColor Red
-        return $false
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ 构建成功" -ForegroundColor Green
+        Write-Host "输出: target\release\irisnote.exe" -ForegroundColor Yellow
+    } else {
+        Write-Host "❌ 构建失败" -ForegroundColor Red
+        exit 1
     }
-    
-    $exePath = "target\release\irisnote.exe"
-    if (Test-Path $exePath) {
-        $size = (Get-Item $exePath).Length / 1MB
-        Write-Host "✅ 标准版构建成功" -ForegroundColor Green
-        Write-Host "   大小: $([math]::Round($size, 2)) MB" -ForegroundColor Gray
-        return $true
-    }
-    
-    return $false
 }
 
-function Build-BitNet {
-    Write-Host "====================================" -ForegroundColor Cyan
-    Write-Host "  构建 BitNet 增强版" -ForegroundColor Cyan
-    Write-Host "====================================" -ForegroundColor Cyan
-    Write-Host ""
+function Build-Debug {
+    Write-Host "构建 IrisNote 调试版（BitNet 增强版）..." -ForegroundColor Cyan
     
-    Write-Host "编译中..." -ForegroundColor Green
-    cargo build --release --features bitnet
+    cargo build
     
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "× 构建失败" -ForegroundColor Red
-        return $false
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ 构建成功" -ForegroundColor Green
+        Write-Host "输出: target\debug\irisnote.exe" -ForegroundColor Yellow
+    } else {
+        Write-Host "❌ 构建失败" -ForegroundColor Red
+        exit 1
     }
-    
-    $exePath = "target\release\irisnote.exe"
-    if (Test-Path $exePath) {
-        $size = (Get-Item $exePath).Length / 1MB
-        Write-Host "✅ BitNet 增强版构建成功" -ForegroundColor Green
-        Write-Host "   大小: $([math]::Round($size, 2)) MB" -ForegroundColor Gray
-        return $true
-    }
-    
-    return $false
 }
 
 function Clean-Build {
@@ -90,47 +68,10 @@ function Clean-Build {
     Write-Host "✅ 清理完成" -ForegroundColor Green
 }
 
-# 主逻辑
 switch ($Command) {
-    "help" {
-        Show-Help
-    }
-    
-    "standard" {
-        Build-Standard
-    }
-    
-    "bitnet" {
-        Build-BitNet
-    }
-    
-    "all" {
-        Write-Host "构建所有版本..." -ForegroundColor Cyan
-        Write-Host ""
-        
-        $success = $true
-        
-        # 标准版
-        if (-not (Build-Standard)) {
-            $success = $false
-        }
-        
-        Write-Host ""
-        
-        # BitNet 版
-        if (-not (Build-BitNet)) {
-            $success = $false
-        }
-        
-        Write-Host ""
-        if ($success) {
-            Write-Host "✅ 所有版本构建成功" -ForegroundColor Green
-        } else {
-            Write-Host "× 部分版本构建失败" -ForegroundColor Red
-        }
-    }
-    
-    "clean" {
-        Clean-Build
-    }
+    "release" { Build-Release }
+    "debug" { Build-Debug }
+    "clean" { Clean-Build }
+    "help" { Show-Help }
+    default { Build-Release }
 }
