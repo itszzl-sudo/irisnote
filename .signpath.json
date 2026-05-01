@@ -1,0 +1,19 @@
+{
+  "signatureSettings": {
+    "codeSigning": {
+      "enabled": true,
+      "description": "IrisNote Smart Text Editor",
+      "files": [
+        "target/release/irisnote.exe"
+      ]
+    }
+  },
+  "buildSettings": {
+    "continuousIntegration": {
+      "githubActions": {
+        "enabled": true,
+        "workflow": "build-and-sign.yml"
+      }
+    }
+  }
+}

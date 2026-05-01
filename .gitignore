@@ -19,6 +19,7 @@ Cargo.lock
 *.dylib
 *.exp
 *.lib
+*.zip
 
 # Certificates
 *.cer
@@ -45,3 +46,7 @@ coverage/
 !CHANGELOG.md
 !LICENSE
 !NOTICE
+
+# Large assets
+iris.ico
+convert_icon.py
