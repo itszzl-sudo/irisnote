@@ -273,15 +273,18 @@ fn render_highlighted(ui: &mut Ui, text: &str, file_type: &FileType) {
         if let Some(syntax) = syntax_name {
             let lines = highlighter.highlight(text, syntax);
             for line in lines {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     for segment in line.segments {
-                        ui.label(RichText::new(&segment.text).font(FontId::monospace(12.0)).color(segment.color));
+                        let label = RichText::new(&segment.text)
+                            .font(FontId::monospace(14.0))
+                            .color(segment.color);
+                        ui.label(label);
                     }
                 });
             }
         } else {
             for line in text.lines() {
-                ui.label(RichText::new(line).font(FontId::monospace(12.0)));
+                ui.label(RichText::new(line).font(FontId::monospace(14.0)));
             }
         }
     });

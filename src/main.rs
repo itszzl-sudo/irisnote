@@ -38,6 +38,11 @@ fn setup_fonts(ctx: &egui::Context) {
     if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/msyh.ttc") {
         fonts.font_data.insert(
             "msyh".to_owned(),
+            egui::FontData::from_owned(font_data.clone()),
+        );
+        
+        fonts.font_data.insert(
+            "emoji".to_owned(),
             egui::FontData::from_owned(font_data),
         );
         
