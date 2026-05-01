@@ -28,8 +28,36 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "IrisNote",
         options,
-        Box::new(|cc| Box::new(TextEditor::new(cc))),
+        Box::new(|cc| {
+            setup_fonts(&cc.egui_ctx);
+            Box::new(TextEditor::new(cc))
+        }),
     )
+}
+
+fn setup_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    
+    if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/msyh.ttc") {
+        fonts.font_data.insert(
+            "msyh".to_owned(),
+            egui::FontData::from_owned(font_data),
+        );
+        
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, "msyh".to_owned());
+        
+        fonts
+            .families
+            .entry(egui::FontFamily::Monospace)
+            .or_default()
+            .insert(0, "msyh".to_owned());
+        
+        ctx.set_fonts(fonts);
+    }
 }
 
 struct TextEditor {
