@@ -1,0 +1,51 @@
+IrisNote
+Copyright 2024 itszzl-sudo <irisverse@outlook.com>
+
+This product includes software developed at the IrisNote Project
+(https://github.com/itszzl-sudo/irisnote).
+
+---
+
+This project uses the following third-party libraries:
+
+egui - Immediate mode GUI framework for Rust
+Copyright (c) 2020 Emil Lenngren
+Licensed under the Apache License, Version 2.0
+
+pulldown-cmark - Pull parser for CommonMark
+Copyright (c) 2015 Raph Levien
+Licensed under the MIT License
+
+resvg - An SVG rendering library
+Copyright (c) 2019 Yevhenii Reizner
+Licensed under the MPL-2.0 License
+
+syntect - Rust library for syntax highlighting
+Copyright (c) 2015-2017 Thomson Truong
+Licensed under the MIT License
+
+serde - A serialization framework for Rust
+Copyright (c) 2017-2024 Serde Developers
+Licensed under the Apache License, Version 2.0
+
+serde_json - A JSON serialization file format
+Copyright (c) 2017-2024 Serde Developers
+Licensed under the Apache License, Version 2.0
+
+dirs - A low-level library for multi-platform directories
+Licensed under the MIT OR Apache-2.0 License
+
+image - Imaging library for Rust
+Copyright (c) 2014-2024 The image-rs Developers
+Licensed under the MIT License
+
+tiny-skia - A tiny Skia library written in Rust
+Copyright (c) 2020 Yevhenii Reizner
+Licensed under the BSD-3-Clause License
+
+winreg - Rust library to access Windows registry
+Copyright (c) 2016 Igor Shaulov
+Licensed under the MIT License
+
+rfd - Rusty File Dialog
+Licensed under the MIT OR Apache-2.0 License

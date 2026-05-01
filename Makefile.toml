@@ -1,0 +1,80 @@
+[tasks.build]
+description = "Build the project"
+command = "cargo"
+args = ["build"]
+
+[tasks.build-release]
+description = "Build for release"
+command = "cargo"
+args = ["build", "--release"]
+
+[tasks.run]
+description = "Run the application"
+command = "cargo"
+args = ["run"]
+
+[tasks.test]
+description = "Run tests"
+command = "cargo"
+args = ["test"]
+
+[tasks.clippy]
+description = "Run clippy"
+command = "cargo"
+args = ["clippy", "--", "-D", "warnings"]
+
+[tasks.fmt]
+description = "Format code"
+command = "cargo"
+args = ["fmt"]
+
+[tasks.fmt-check]
+description = "Check formatting"
+command = "cargo"
+args = ["fmt", "--", "--check"]
+
+[tasks.doc]
+description = "Generate documentation"
+command = "cargo"
+args = ["doc", "--open"]
+
+[tasks.clean]
+description = "Clean build artifacts"
+command = "cargo"
+args = ["clean"]
+
+[tasks.check]
+description = "Check the project"
+command = "cargo"
+args = ["check"]
+
+[tasks.audit]
+description = "Run security audit"
+command = "cargo"
+args = ["audit"]
+
+[tasks.ci]
+description = "Run CI checks"
+dependencies = [
+    "fmt-check",
+    "clippy",
+    "test",
+    "build"
+]
+
+[tasks.dev]
+description = "Development build and run"
+dependencies = [
+    "build",
+    "run"
+]
+
+[tasks.release]
+description = "Prepare release"
+dependencies = [
+    "clean",
+    "fmt-check",
+    "clippy",
+    "test",
+    "build-release"
+]

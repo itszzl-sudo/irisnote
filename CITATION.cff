@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "如果您在研究中使用了此软件，请按以下格式引用。"
+title: "IrisNote"
+version: 0.1.0
+date-released: 2024-05-01
+url: "https://github.com/itszzl-sudo/irisnote"
+repository-code: "https://github.com/itszzl-sudo/irisnote.git"
+license: Apache-2.0
+keywords:
+  - text-editor
+  - rust
+  - markdown
+  - svg
+  - syntax-highlighting
+  - file-type-detection
+authors:
+  - family-names: "sudo"
+    given-names: "itszzl"
+    email: "irisverse@outlook.com"
+abstract: |
+  A smart text editor built with Rust that features automatic file type 
+  detection, intelligent file naming suggestions, and multi-mode preview 
+  capabilities including Markdown rendering, SVG visualization, and syntax 
+  highlighting for various programming languages.
+preferred-citation:
+  type: software
+  authors:
+    - family-names: "sudo"
+      given-names: "itszzl"
+      email: "irisverse@outlook.com"
+  title: "IrisNote"
+  year: 2024
+  url: "https://github.com/itszzl-sudo/irisnote"
+identifiers:
+  - type: url
+    value: "https://github.com/itszzl-sudo/irisnote"

@@ -1,0 +1,29 @@
+{
+  "name": "IrisNote",
+  "description": "A smart text editor with auto-detection, preview, and intelligent naming",
+  "homepage": "https://github.com/itszzl-sudo/irisnote",
+  "license": "Apache-2.0",
+  "keywords": [
+    "rust",
+    "text-editor",
+    "markdown",
+    "svg",
+    "syntax-highlighting",
+    "gui",
+    "egui"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/itszzl-sudo/irisnote.git"
+  },
+  "bugs": {
+    "url": "https://github.com/itszzl-sudo/irisnote/issues"
+  },
+  "author": {
+    "name": "itszzl-sudo"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/itszzl-sudo"
+  }
+}

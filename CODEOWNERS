@@ -1,0 +1,22 @@
+# CODEOWNERS 文件
+# 用于自动分配 PR 审查者
+# 文档: https://docs.github.com/zh/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# 默认所有者
+* @itszzl-sudo
+
+# 源代码
+/src/ @itszzl-sudo
+
+# 文档
+/README*.md @itszzl-sudo
+/CONTRIBUTING.md @itszzl-sudo
+/CHANGELOG.md @itszzl-sudo
+
+# 构建配置
+/Cargo.toml @itszzl-sudo
+/build.rs @itszzl-sudo
+/.github/ @itszzl-sudo
+
+# 示例文件
+/examples/ @itszzl-sudo

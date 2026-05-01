@@ -1,0 +1,31 @@
+[package]
+name = "irisnote"
+version = "0.1.0"
+edition = "2021"
+authors = ["itszzl-sudo <irisverse@outlook.com>"]
+description = "A smart text editor with auto-detection, preview, and intelligent naming"
+repository = "https://github.com/itszzl-sudo/irisnote"
+license = "Apache-2.0"
+
+[dependencies]
+eframe = "0.27"
+egui = "0.27"
+egui_extras = "0.27"
+syntect = "5"
+pulldown-cmark = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+image = "0.25"
+resvg = "0.40"
+usvg = "0.40"
+tiny-skia = "0.11"
+winreg = "0.52"
+rfd = "0.14"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true

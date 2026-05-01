@@ -1,0 +1,26 @@
+[package]
+name = "smart-text-editor-lite"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.27"
+egui = "0.27"
+pulldown-cmark = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+resvg = "0.40"
+usvg = "0.40"
+tiny-skia = "0.11"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+rfd = "0.14"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true
