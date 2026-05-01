@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 mod file_type;
 mod preview;
 mod config;
@@ -35,14 +37,10 @@ fn main() -> eframe::Result<()> {
 fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     
+    // Load Microsoft YaHei for Chinese text
     if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/msyh.ttc") {
         fonts.font_data.insert(
             "msyh".to_owned(),
-            egui::FontData::from_owned(font_data.clone()),
-        );
-        
-        fonts.font_data.insert(
-            "emoji".to_owned(),
             egui::FontData::from_owned(font_data),
         );
         
@@ -57,9 +55,30 @@ fn setup_fonts(ctx: &egui::Context) {
             .entry(egui::FontFamily::Monospace)
             .or_default()
             .insert(0, "msyh".to_owned());
-        
-        ctx.set_fonts(fonts);
     }
+    
+    // Load Segoe UI Emoji for colored emojis
+    if let Ok(emoji_data) = std::fs::read("C:/Windows/Fonts/seguisym.ttf") {
+        fonts.font_data.insert(
+            "emoji".to_owned(),
+            egui::FontData::from_owned(emoji_data),
+        );
+        
+        // Add emoji font as fallback for all families
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .push("emoji".to_owned());
+        
+        fonts
+            .families
+            .entry(egui::FontFamily::Monospace)
+            .or_default()
+            .push("emoji".to_owned());
+    }
+    
+    ctx.set_fonts(fonts);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -362,17 +381,21 @@ impl eframe::App for TextEditor {
             egui::TopBottomPanel::top("summary_bar")
                 .resizable(false)
                 .show_separator_line(false)
+                .frame(egui::Frame::default()
+                    .fill(Color32::from_rgb(45, 45, 48))
+                    .inner_margin(egui::vec2(8.0, 4.0))
+                )
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         if let Some(ref summary) = self.summary {
-                            ui.label(RichText::new("📝 ").color(Color32::LIGHT_BLUE));
-                            ui.label(RichText::new(summary).color(Color32::LIGHT_GRAY));
-                            ui.separator();
+                            ui.label(RichText::new("📝 ").size(14.0).color(Color32::from_rgb(100, 200, 255)));
+                            ui.label(RichText::new(summary).size(13.0).color(Color32::from_rgb(220, 220, 220)));
+                            ui.add_space(10.0);
                         }
                         
                         if let Some(ref filename) = self.suggested_filename {
-                            ui.label(RichText::new("📁 ").color(Color32::LIGHT_GREEN));
-                            ui.label(RichText::new(format!("建议: {}", filename)).color(Color32::LIGHT_GRAY));
+                            ui.label(RichText::new("📁 ").size(14.0).color(Color32::from_rgb(100, 220, 100)));
+                            ui.label(RichText::new(format!("建议: {}", filename)).size(13.0).color(Color32::from_rgb(220, 220, 220)));
                         }
                     });
                 });
