@@ -229,120 +229,123 @@ impl TextEditor {
 
 impl eframe::App for TextEditor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::menu::bar(ctx, |ui| {
-            ui.menu_button("文件", |ui| {
-                if ui.button("新建").clicked() {
-                    self.text.clear();
-                    self.file_path = None;
-                    self.file_type = FileType::PlainText;
-                    
-                    #[cfg(feature = "bitnet")]
-                    {
-                        self.suggested_filename = None;
-                    }
-                    
-                    ui.close_menu();
-                }
-                
-                if ui.button("打开...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().pick_file() {
-                        self.open_file(path);
-                    }
-                    ui.close_menu();
-                }
-                
-                ui.menu_button("最近打开", |ui| {
-                    for path in self.recent_paths.iter() {
-                        if ui.button(path.display().to_string()).clicked() {
-                            self.open_file(path.clone());
-                            ui.close_menu();
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("文件", |ui| {
+                    if ui.button("新建").clicked() {
+                        self.text.clear();
+                        self.file_path = None;
+                        self.file_type = FileType::PlainText;
+                        
+                        #[cfg(feature = "bitnet")]
+                        {
+                            self.suggested_filename = None;
                         }
-                    }
-                });
-                
-                if ui.button("保存").clicked() {
-                    self.save_file();
-                    ui.close_menu();
-                }
-                
-                if ui.button("另存为...").clicked() {
-                    let suggested = self.get_suggested_filename();
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name(&suggested)
-                        .save_file()
-                    {
-                        self.save_as(path);
-                    }
-                    ui.close_menu();
-                }
-            });
-            
-            ui.menu_button("视图", |ui| {
-                ui.checkbox(&mut self.show_preview, "显示预览");
-                ui.separator();
-                
-                if ui.radio_value(&mut self.preview_mode, PreviewMode::Editor, "编辑器").clicked() {
-                    ui.close_menu();
-                }
-                if ui.radio_value(&mut self.preview_mode, PreviewMode::Markdown, "Markdown 预览").clicked() {
-                    ui.close_menu();
-                }
-                if ui.radio_value(&mut self.preview_mode, PreviewMode::Image, "图片预览").clicked() {
-                    ui.close_menu();
-                }
-                if ui.radio_value(&mut self.preview_mode, PreviewMode::Highlighted, "语法高亮").clicked() {
-                    ui.close_menu();
-                }
-            });
-            
-            #[cfg(feature = "bitnet")]
-            ui.menu_button("智能分析", |ui| {
-                ui.checkbox(&mut self.bitnet_enabled, "启用智能命名");
-                
-                if self.bitnet_enabled {
-                    ui.separator();
-                    
-                    if ui.button("分析当前内容").clicked() {
-                        self.summarize_with_bitnet();
+                        
                         ui.close_menu();
                     }
                     
-                    if let Some(ref name) = self.suggested_filename {
-                        ui.separator();
-                        ui.label(format!("建议文件名: {}", name));
+                    if ui.button("打开...").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            self.open_file(path);
+                        }
+                        ui.close_menu();
                     }
-                }
+                    
+                    ui.menu_button("最近打开", |ui| {
+                        let paths: Vec<PathBuf> = self.recent_paths.clone();
+                        for path in paths.iter() {
+                            if ui.button(path.display().to_string()).clicked() {
+                                self.open_file(path.clone());
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    
+                    if ui.button("保存").clicked() {
+                        self.save_file();
+                        ui.close_menu();
+                    }
+                    
+                    if ui.button("另存为...").clicked() {
+                        let suggested = self.get_suggested_filename();
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_file_name(&suggested)
+                            .save_file()
+                        {
+                            self.save_as(path);
+                        }
+                        ui.close_menu();
+                    }
+                });
                 
-                ui.separator();
-                ui.label("基于关键词提取");
-                ui.label("无需外部依赖");
-            });
-            
-            #[cfg(not(feature = "bitnet"))]
-            ui.menu_button("智能分析", |ui| {
-                ui.label("智能分析未启用");
-                ui.separator();
-                ui.label("要启用请使用:");
-                ui.label("cargo build --features bitnet");
-            });
-            
-            #[cfg(target_os = "windows")]
-            ui.menu_button("工具", |ui| {
-                if ui.button("关联所有支持的文件类型").clicked() {
-                    file_association::register_all_extensions();
-                    self.message = Some("文件关联已注册".to_string());
-                    ui.close_menu();
-                }
+                ui.menu_button("视图", |ui| {
+                    ui.checkbox(&mut self.show_preview, "显示预览");
+                    ui.separator();
+                    
+                    if ui.radio_value(&mut self.preview_mode, PreviewMode::Editor, "编辑器").clicked() {
+                        ui.close_menu();
+                    }
+                    if ui.radio_value(&mut self.preview_mode, PreviewMode::Markdown, "Markdown 预览").clicked() {
+                        ui.close_menu();
+                    }
+                    if ui.radio_value(&mut self.preview_mode, PreviewMode::Image, "图片预览").clicked() {
+                        ui.close_menu();
+                    }
+                    if ui.radio_value(&mut self.preview_mode, PreviewMode::Highlighted, "语法高亮").clicked() {
+                        ui.close_menu();
+                    }
+                });
                 
-                ui.menu_button("选择性关联", |ui| {
-                    let extensions = file_type::get_supported_extensions();
-                    for ext in extensions {
-                        if ui.button(&format!(".{}", ext)).clicked() {
-                            file_association::register_extension(&ext);
-                            self.message = Some(format!(".{} 已关联", ext));
+                #[cfg(feature = "bitnet")]
+                ui.menu_button("智能分析", |ui| {
+                    ui.checkbox(&mut self.bitnet_enabled, "启用智能命名");
+                    
+                    if self.bitnet_enabled {
+                        ui.separator();
+                        
+                        if ui.button("分析当前内容").clicked() {
+                            self.summarize_with_bitnet();
                             ui.close_menu();
                         }
+                        
+                        if let Some(ref name) = self.suggested_filename {
+                            ui.separator();
+                            ui.label(format!("建议文件名: {}", name));
+                        }
                     }
+                    
+                    ui.separator();
+                    ui.label("基于关键词提取");
+                    ui.label("无需外部依赖");
+                });
+                
+                #[cfg(not(feature = "bitnet"))]
+                ui.menu_button("智能分析", |ui| {
+                    ui.label("智能分析未启用");
+                    ui.separator();
+                    ui.label("要启用请使用:");
+                    ui.label("cargo build --features bitnet");
+                });
+                
+                #[cfg(target_os = "windows")]
+                ui.menu_button("工具", |ui| {
+                    if ui.button("关联所有支持的文件类型").clicked() {
+                        file_association::register_all_extensions();
+                        self.message = Some("文件关联已注册".to_string());
+                        ui.close_menu();
+                    }
+                    
+                    ui.menu_button("选择性关联", |ui| {
+                        let extensions = file_type::get_supported_extensions();
+                        for ext in extensions {
+                            if ui.button(format!(".{}", ext)).clicked() {
+                                file_association::register_extension(&ext);
+                                self.message = Some(format!(".{} 已关联", ext));
+                                ui.close_menu();
+                            }
+                        }
+                    });
                 });
             });
         });
@@ -355,7 +358,7 @@ impl eframe::App for TextEditor {
                     #[cfg(feature = "bitnet")]
                     if self.bitnet_enabled {
                         ui.separator();
-                        ui.label(RichText::new("🔍 智能分析").color(Color32::LIGHT_BLUE));
+                        ui.label(RichText::new("智能分析已启用").color(Color32::LIGHT_BLUE));
                     }
                 });
             });

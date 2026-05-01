@@ -1,7 +1,4 @@
 use std::path::Path;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use crate::llm_service::{LLMService, LLMConfig};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileType {
@@ -49,6 +46,40 @@ pub fn get_supported_extensions() -> Vec<String> {
     ]
 }
 
+pub fn is_text_file(path: &Path) -> bool {
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext_lower = ext.to_lowercase();
+        return matches!(
+            ext_lower.as_str(),
+            "txt" | "md" | "rst" | "rs" | "py" | "js" | "ts" | "jsx" | "tsx" |
+            "html" | "htm" | "css" | "scss" | "sass" | "less" |
+            "json" | "xml" | "yaml" | "yml" | "toml" | "ini" | "cfg" | "conf" |
+            "svg" | "c" | "cpp" | "cc" | "cxx" | "h" | "hpp" |
+            "java" | "go" | "kt" | "kts" | "swift" |
+            "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat" | "cmd" |
+            "sql" | "lua" | "rb" | "php" | "pl" | "pm" |
+            "dockerfile" | "makefile" | "cmake" | "gradle" | "maven" |
+            "gitignore" | "gitattributes" | "editorconfig" |
+            "license" | "readme" | "changelog" | "authors" | "contributors" |
+            "log" | "csv" | "tsv" | "env" | "properties"
+        );
+    }
+    
+    if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
+        let filename_lower = filename.to_lowercase();
+        return matches!(
+            filename_lower.as_str(),
+            "dockerfile" | "makefile" | "cmakelists.txt" | "vagrantfile" |
+            "gemfile" | "rakefile" | "procfile" | "license" | "readme" |
+            "changelog" | "authors" | "contributors" | "copying" |
+            ".gitignore" | ".gitattributes" | ".editorconfig" | ".env" |
+            ".bashrc" | ".zshrc" | ".profile" | "cargo.toml" | "package.json"
+        );
+    }
+    
+    false
+}
+
 pub fn detect_file_type(content: &str, path: Option<&Path>) -> FileType {
     if let Some(p) = path {
         if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
@@ -56,22 +87,35 @@ pub fn detect_file_type(content: &str, path: Option<&Path>) -> FileType {
                 "md" => FileType::Markdown,
                 "rs" => FileType::Rust,
                 "py" => FileType::Python,
-                "js" => FileType::JavaScript,
-                "ts" => FileType::TypeScript,
+                "js" | "jsx" => FileType::JavaScript,
+                "ts" | "tsx" => FileType::TypeScript,
                 "html" | "htm" => FileType::HTML,
-                "css" => FileType::CSS,
+                "css" | "scss" | "sass" | "less" => FileType::CSS,
                 "json" => FileType::JSON,
                 "xml" => FileType::XML,
                 "yaml" | "yml" => FileType::YAML,
                 "toml" => FileType::TOML,
                 "svg" => FileType::SVG,
-                "png" | "jpg" | "jpeg" | "gif" | "bmp" => FileType::Image(ext.to_string()),
-                "c" => FileType::C,
-                "cpp" | "cc" | "cxx" => FileType::CPP,
+                "png" | "jpg" | "jpeg" | "gif" | "bmp" | "ico" => FileType::Image(ext.to_string()),
+                "c" | "h" => FileType::C,
+                "cpp" | "cc" | "cxx" | "hpp" => FileType::CPP,
                 "java" => FileType::Java,
                 "go" => FileType::Go,
                 _ => detect_from_content(content),
             };
+        }
+        
+        if let Some(filename) = p.file_name().and_then(|f| f.to_str()) {
+            let filename_lower = filename.to_lowercase();
+            if filename_lower == "cargo.toml" {
+                return FileType::TOML;
+            }
+            if filename_lower == "package.json" {
+                return FileType::JSON;
+            }
+            if filename_lower == "makefile" || filename_lower == "dockerfile" {
+                return FileType::PlainText;
+            }
         }
     }
     
@@ -85,7 +129,7 @@ fn detect_from_content(content: &str) -> FileType {
         return FileType::PlainText;
     }
     
-    if trimmed.starts_with("<?xml") || trimmed.starts_with("<") && trimmed.contains("xmlns") {
+    if trimmed.starts_with("<?xml") || (trimmed.starts_with('<') && trimmed.contains("xmlns")) {
         return FileType::XML;
     }
     
@@ -129,7 +173,7 @@ fn detect_from_content(content: &str) -> FileType {
         return FileType::C;
     }
     
-    if trimmed.starts_with("public class") || trimmed.starts_with("class ") && trimmed.contains("public static void main") {
+    if trimmed.starts_with("public class") || (trimmed.starts_with("class ") && trimmed.contains("public static void main")) {
         return FileType::Java;
     }
     
@@ -141,7 +185,7 @@ fn detect_from_content(content: &str) -> FileType {
         return FileType::JavaScript;
     }
     
-    if trimmed.starts_with(".") || trimmed.starts_with("#") && trimmed.contains("{") {
+    if trimmed.starts_with('.') || (trimmed.starts_with('#') && trimmed.contains('{')) {
         return FileType::CSS;
     }
     
@@ -150,239 +194,11 @@ fn detect_from_content(content: &str) -> FileType {
         return FileType::Markdown;
     }
     
-    if trimmed.starts_with("[") && trimmed.contains("=") {
+    if trimmed.starts_with('[') && trimmed.contains('=') {
         return FileType::TOML;
     }
     
     FileType::PlainText
-}
-
-pub struct FilenameSuggester {
-    llm_service: Arc<RwLock<Option<LLMService>>>,
-}
-
-impl FilenameSuggester {
-    pub fn new() -> Self {
-        Self {
-            llm_service: Arc::new(RwLock::new(None)),
-        }
-    }
-    
-    pub fn with_llm(llm_config: LLMConfig) -> Self {
-        Self {
-            llm_service: Arc::new(RwLock::new(Some(LLMService::with_config(llm_config)))),
-        }
-    }
-    
-    pub async fn set_llm_service(&self, config: LLMConfig) {
-        let mut service = self.llm_service.write().await;
-        *service = Some(LLMService::with_config(config));
-    }
-    
-    pub async fn suggest_filename(
-        &self,
-        content: &str,
-        path: Option<&Path>,
-        file_type: &FileType,
-    ) -> String {
-        if let Some(p) = path {
-            if let Some(filename) = p.file_name().and_then(|f| f.to_str()) {
-                return filename.to_string();
-            }
-        }
-        
-        let ext = get_extension_for_type(file_type);
-        
-        let suggested_name = self.extract_meaningful_name(content, file_type).await;
-        
-        format!("{}.{}", suggested_name, ext)
-    }
-    
-    async fn extract_meaningful_name(&self, content: &str, file_type: &FileType) -> String {
-        let lines: Vec<&str> = content.lines().take(20).collect();
-        
-        let name = match file_type {
-            FileType::Rust => self.extract_rust_name(&lines),
-            FileType::Python => self.extract_python_name(&lines),
-            FileType::JavaScript | FileType::TypeScript => self.extract_js_name(&lines),
-            FileType::Markdown => self.extract_markdown_name(&lines),
-            FileType::HTML => self.extract_html_name(content),
-            FileType::Go => self.extract_go_name(&lines),
-            FileType::Java => self.extract_java_name(&lines),
-            FileType::C | FileType::CPP => self.extract_c_name(&lines),
-            FileType::JSON => self.extract_json_name(content),
-            FileType::TOML => self.extract_toml_name(&lines),
-            _ => None,
-        };
-        
-        if let Some(n) = name {
-            return n;
-        }
-        
-        if content.len() > 50 {
-            if let Some(llm) = self.llm_service.read().await.as_ref() {
-                if llm.is_available().await {
-                    match llm.summarize_content(content).await {
-                        Ok(title) => {
-                            if !title.is_empty() && title != "untitled" {
-                                return title;
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("LLM 总结失败: {}", e);
-                        }
-                    }
-                }
-            }
-        }
-        
-        "untitled".to_string()
-    }
-    
-    fn extract_rust_name(&self, lines: &[&str]) -> Option<String> {
-        for line in lines {
-            if line.starts_with("fn ") {
-                if let Some(name) = line.strip_prefix("fn ") {
-                    let name = name.split('(').next().unwrap_or("main");
-                    return Some(sanitize_name(name));
-                }
-            }
-            if line.starts_with("mod ") {
-                if let Some(name) = line.strip_prefix("mod ") {
-                    let name = name.trim().trim_end_matches(';');
-                    return Some(sanitize_name(name));
-                }
-            }
-        }
-        None
-    }
-    
-    fn extract_python_name(&self, lines: &[&str]) -> Option<String> {
-        for line in lines {
-            if line.starts_with("def ") {
-                if let Some(name) = line.strip_prefix("def ") {
-                    let name = name.split('(').next().unwrap_or("main");
-                    return Some(sanitize_name(name));
-                }
-            }
-            if line.starts_with("class ") {
-                if let Some(name) = line.strip_prefix("class ") {
-                    let name = name.split(':').next().unwrap_or("MyClass");
-                    return Some(sanitize_name(name));
-                }
-            }
-        }
-        None
-    }
-    
-    fn extract_js_name(&self, lines: &[&str]) -> Option<String> {
-        for line in lines {
-            if line.starts_with("function ") {
-                if let Some(name) = line.strip_prefix("function ") {
-                    let name = name.split('(').next().unwrap_or("main");
-                    return Some(sanitize_name(name));
-                }
-            }
-            if line.contains("const ") && line.contains(" = ") {
-                for part in line.split("const ") {
-                    if part.contains(" = ") {
-                        let name = part.split(" = ").next().unwrap_or("main");
-                        return Some(sanitize_name(name.trim()));
-                    }
-                }
-            }
-        }
-        None
-    }
-    
-    fn extract_markdown_name(&self, lines: &[&str]) -> Option<String> {
-        for line in lines {
-            if line.starts_with("# ") {
-                if let Some(title) = line.strip_prefix("# ") {
-                    return Some(sanitize_name(title));
-                }
-            }
-        }
-        None
-    }
-    
-    fn extract_html_name(&self, content: &str) -> Option<String> {
-        if content.contains("<title>") {
-            if let Some(start) = content.find("<title>") {
-                if let Some(end) = content.find("</title>") {
-                    if end > start {
-                        let title = &content[start + 7..end];
-                        return Some(sanitize_name(title));
-                    }
-                }
-            }
-        }
-        None
-    }
-    
-    fn extract_go_name(&self, lines: &[&str]) -> Option<String> {
-        for line in lines {
-            if line.starts_with("func ") {
-                if let Some(name) = line.strip_prefix("func ") {
-                    let name = name.split('(').next().unwrap_or("main");
-                    return Some(sanitize_name(name));
-                }
-            }
-        }
-        None
-    }
-    
-    fn extract_java_name(&self, lines: &[&str]) -> Option<String> {
-        for line in lines {
-            if line.contains("class ") {
-                for part in line.split("class ") {
-                    if !part.is_empty() {
-                        let name = part.split_whitespace().next().unwrap_or("Main");
-                        return Some(sanitize_name(name));
-                    }
-                }
-            }
-        }
-        None
-    }
-    
-    fn extract_c_name(&self, lines: &[&str]) -> Option<String> {
-        for line in lines {
-            if line.starts_with("int ") && line.contains("main") {
-                return Some("main".to_string());
-            }
-        }
-        None
-    }
-    
-    fn extract_json_name(&self, content: &str) -> Option<String> {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
-            if let Some(obj) = json.as_object() {
-                if obj.contains_key("name") {
-                    if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
-                        return Some(sanitize_name(name));
-                    }
-                }
-                if obj.contains_key("package") {
-                    if let Some(name) = obj.get("package").and_then(|v| v.as_str()) {
-                        return Some(sanitize_name(name));
-                    }
-                }
-            }
-        }
-        None
-    }
-    
-    fn extract_toml_name(&self, lines: &[&str]) -> Option<String> {
-        for line in lines {
-            if line.starts_with("name = ") {
-                if let Some(name) = line.strip_prefix("name = ") {
-                    return Some(sanitize_name(name.trim_matches('"')));
-                }
-            }
-        }
-        None
-    }
 }
 
 fn sanitize_name(name: &str) -> String {
@@ -399,26 +215,26 @@ fn sanitize_name(name: &str) -> String {
     }
 }
 
-fn get_extension_for_type(file_type: &FileType) -> &'static str {
+fn get_extension_for_type(file_type: &FileType) -> String {
     match file_type {
-        FileType::PlainText => "txt",
-        FileType::Markdown => "md",
-        FileType::Rust => "rs",
-        FileType::Python => "py",
-        FileType::JavaScript => "js",
-        FileType::TypeScript => "ts",
-        FileType::HTML => "html",
-        FileType::CSS => "css",
-        FileType::JSON => "json",
-        FileType::XML => "xml",
-        FileType::YAML => "yaml",
-        FileType::TOML => "toml",
-        FileType::SVG => "svg",
-        FileType::Image(ext) => ext.as_str(),
-        FileType::C => "c",
-        FileType::CPP => "cpp",
-        FileType::Java => "java",
-        FileType::Go => "go",
+        FileType::PlainText => "txt".to_string(),
+        FileType::Markdown => "md".to_string(),
+        FileType::Rust => "rs".to_string(),
+        FileType::Python => "py".to_string(),
+        FileType::JavaScript => "js".to_string(),
+        FileType::TypeScript => "ts".to_string(),
+        FileType::HTML => "html".to_string(),
+        FileType::CSS => "css".to_string(),
+        FileType::JSON => "json".to_string(),
+        FileType::XML => "xml".to_string(),
+        FileType::YAML => "yaml".to_string(),
+        FileType::TOML => "toml".to_string(),
+        FileType::SVG => "svg".to_string(),
+        FileType::Image(ext) => ext.clone(),
+        FileType::C => "c".to_string(),
+        FileType::CPP => "cpp".to_string(),
+        FileType::Java => "java".to_string(),
+        FileType::Go => "go".to_string(),
     }
 }
 
@@ -430,9 +246,7 @@ pub fn suggest_filename(content: &str, path: Option<&Path>, file_type: &FileType
     }
     
     let ext = get_extension_for_type(file_type);
-    
     let suggested_name = extract_meaningful_name(content, file_type);
-    
     format!("{}.{}", suggested_name, ext)
 }
 
@@ -448,6 +262,12 @@ fn extract_meaningful_name(content: &str, file_type: &FileType) -> String {
                         return sanitize_name(name);
                     }
                 }
+                if line.starts_with("mod ") {
+                    if let Some(name) = line.strip_prefix("mod ") {
+                        let name = name.trim().trim_end_matches(';');
+                        return sanitize_name(name);
+                    }
+                }
             }
             "main".to_string()
         }
@@ -459,8 +279,95 @@ fn extract_meaningful_name(content: &str, file_type: &FileType) -> String {
                         return sanitize_name(name);
                     }
                 }
+                if line.starts_with("class ") {
+                    if let Some(name) = line.strip_prefix("class ") {
+                        let name = name.split(':').next().unwrap_or("MyClass");
+                        return sanitize_name(name);
+                    }
+                }
             }
             "main".to_string()
+        }
+        FileType::JavaScript | FileType::TypeScript => {
+            for line in &lines {
+                if line.starts_with("function ") {
+                    if let Some(name) = line.strip_prefix("function ") {
+                        let name = name.split('(').next().unwrap_or("main");
+                        return sanitize_name(name);
+                    }
+                }
+            }
+            "main".to_string()
+        }
+        FileType::Markdown => {
+            for line in &lines {
+                if line.starts_with("# ") {
+                    if let Some(title) = line.strip_prefix("# ") {
+                        return sanitize_name(title);
+                    }
+                }
+            }
+            "untitled".to_string()
+        }
+        FileType::HTML => {
+            if content.contains("<title>") {
+                if let Some(start) = content.find("<title>") {
+                    if let Some(end) = content.find("</title>") {
+                        if end > start {
+                            let title = &content[start + 7..end];
+                            return sanitize_name(title);
+                        }
+                    }
+                }
+            }
+            "untitled".to_string()
+        }
+        FileType::Go => {
+            for line in &lines {
+                if line.starts_with("func ") {
+                    if let Some(name) = line.strip_prefix("func ") {
+                        let name = name.split('(').next().unwrap_or("main");
+                        return sanitize_name(name);
+                    }
+                }
+            }
+            "main".to_string()
+        }
+        FileType::Java => {
+            for line in &lines {
+                if line.contains("class ") {
+                    for part in line.split("class ") {
+                        if !part.is_empty() {
+                            let name = part.split_whitespace().next().unwrap_or("Main");
+                            return sanitize_name(name);
+                        }
+                    }
+                }
+            }
+            "Main".to_string()
+        }
+        FileType::JSON => {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
+                if let Some(obj) = json.as_object() {
+                    if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+                        return sanitize_name(name);
+                    }
+                    if let Some(name) = obj.get("package").and_then(|v| v.as_str()) {
+                        return sanitize_name(name);
+                    }
+                }
+            }
+            "untitled".to_string()
+        }
+        FileType::TOML => {
+            for line in &lines {
+                if line.starts_with("name = ") {
+                    if let Some(name) = line.strip_prefix("name = ") {
+                        return sanitize_name(name.trim_matches('"'));
+                    }
+                }
+            }
+            "untitled".to_string()
         }
         _ => "untitled".to_string(),
     }

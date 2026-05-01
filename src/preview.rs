@@ -1,5 +1,5 @@
 use crate::file_type::FileType;
-use egui::{Color32, FontId, RichText, TextureHandle, Ui, Vec2};
+use egui::{Color32, FontId, RichText, Ui};
 use pulldown_cmark::{html::push_html, Parser};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -190,12 +190,18 @@ fn render_image(ui: &mut Ui, text: &str, file_type: &FileType) {
 
 fn render_svg(ui: &mut Ui, svg_content: &str) {
     let options = usvg::Options::default();
+    let fontdb = usvg::fontdb::Database::new();
     
-    match usvg::Tree::from_str(svg_content, &options) {
+    match usvg::Tree::from_str(svg_content, &options, &fontdb) {
         Ok(tree) => {
             let size = tree.size();
             let width = size.width() as u32;
             let height = size.height() as u32;
+            
+            if width == 0 || height == 0 {
+                ui.colored_label(Color32::RED, "SVG 尺寸无效");
+                return;
+            }
             
             let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
             
@@ -232,7 +238,9 @@ fn render_svg(ui: &mut Ui, svg_content: &str) {
             
             let display_size = texture_size * scale;
             
-            ui.image(&texture).fit_to_exact_size(display_size);
+            let mut image = egui::Image::new(&texture);
+            image = image.max_size(display_size);
+            ui.add(image);
         }
         Err(e) => {
             ui.colored_label(Color32::RED, format!("SVG 解析错误: {}", e));
