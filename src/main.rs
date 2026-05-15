@@ -8,28 +8,41 @@ mod syntax_highlight;
 mod bitnet_service;
 
 use eframe::egui;
-use egui::{Color32, FontId, RichText, Vec2};
+use egui::{Color32, FontId, RichText};
+use egui_extras::syntax_highlighting::{highlight, CodeTheme};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::fs;
-use crate::file_type::{detect_file_type, FileType, suggest_filename};
+use crate::file_type::{detect_file_type, FileType, suggest_filename, suggest_filenames, is_meaningless_filename};
 use crate::preview::{PreviewMode, render_preview};
 use crate::config::Config;
 use crate::bitnet_service::{BitNetService, BitNetConfig};
 
+static CODE_THEME_LIGHT: OnceLock<CodeTheme> = OnceLock::new();
+static CODE_THEME_DARK: OnceLock<CodeTheme> = OnceLock::new();
+
 fn main() -> eframe::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let initial_file_path = if args.len() > 1 {
+        Some(PathBuf::from(&args[1]))
+    } else {
+        None
+    };
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
             .with_title("IrisNote"),
         ..Default::default()
     };
-    
+
     eframe::run_native(
         "IrisNote",
         options,
         Box::new(|cc| {
             setup_fonts(&cc.egui_ctx);
-            Box::new(TextEditor::new(cc))
+            cc.egui_ctx.set_visuals(egui::Visuals::light());
+            Box::new(TextEditor::new(cc, initial_file_path))
         }),
     )
 }
@@ -82,10 +95,15 @@ fn setup_fonts(ctx: &egui::Context) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Tab {
+enum ViewMode {
     Editor,
     Preview,
+    Split,
+    FileTypes,
 }
+
+// 为了保持兼容性
+type Tab = ViewMode;
 
 struct TextEditor {
     text: String,
@@ -96,148 +114,135 @@ struct TextEditor {
     message: Option<String>,
     
     current_tab: Tab,
-    show_summary: bool,
-    summary: Option<String>,
-    suggested_filename: Option<String>,
     
     bitnet_service: std::sync::Arc<BitNetService>,
+    is_dark_theme: bool,
+    
+    // 光标位置信息
+    last_text_len: usize,
+    
+    // 文件类型搜索
+    file_type_search_query: String,
+    file_type_search_results: Vec<(String, String)>,
+    
+    // 保存时的命名建议
+    show_save_dialog: bool,
+    save_suggestions: Vec<String>,
+    save_filename_input: String,
+    message_timeout: Option<std::time::Instant>,
 }
 
 impl TextEditor {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(_cc: &eframe::CreationContext<'_>, initial_file_path: Option<PathBuf>) -> Self {
         let config = Config::load().unwrap_or_default();
         let recent_paths = config.recent_paths.clone();
         let bitnet_config = BitNetConfig::default();
         let bitnet_service = std::sync::Arc::new(BitNetService::with_config(bitnet_config));
-        
-        Self {
+
+        let mut editor = Self {
             text: String::new(),
             file_path: None,
             file_type: FileType::PlainText,
             config,
             recent_paths,
             message: None,
-            current_tab: Tab::Preview,
-            show_summary: true,
-            summary: None,
-            suggested_filename: None,
+            current_tab: Tab::Editor,
             bitnet_service,
+            is_dark_theme: false,
+            last_text_len: 0,
+            file_type_search_query: String::new(),
+            file_type_search_results: Vec::new(),
+            show_save_dialog: false,
+            save_suggestions: Vec::new(),
+            save_filename_input: String::new(),
+            message_timeout: None,
+        };
+
+        if let Some(path) = initial_file_path {
+            if path.exists() && path.is_file() {
+                editor.open_file(path);
+            }
         }
+
+        editor
     }
-    
+
     fn update_file_type(&mut self) {
         self.file_type = detect_file_type(&self.text, self.file_path.as_deref());
-        self.analyze_content();
-        
-        // Auto-switch to editor for files without preview support
-        if !self.file_type.supports_preview() {
-            self.current_tab = Tab::Editor;
+        // 内容分析已移除，现在只在保存时提供命名建议
+
+        if self.file_type.has_visual_preview() && self.current_tab == Tab::Editor {
+            // 如果是支持预览的文件，默认使用分屏模式而不是纯预览
+            self.current_tab = Tab::Split;
         }
     }
     
-    fn analyze_content(&mut self) {
-        if self.text.is_empty() {
-            self.summary = None;
-            self.suggested_filename = None;
-            return;
-        }
-        
-        let suggested = suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type);
-        self.suggested_filename = Some(suggested);
-        
-        match self.bitnet_service.summarize_content(&self.text) {
-            Ok(summary) if summary != "untitled" => {
-                self.summary = Some(summary);
-            }
-            _ => {
-                self.summary = self.generate_summary();
-            }
-        }
+    fn get_cursor_position(&self) -> (usize, usize) {
+        // 简化版本：暂时返回合理位置
+        let line_count = self.text.lines().count().max(1);
+        let col = 1;
+        (line_count, col)
     }
-    
-    fn generate_summary(&self) -> Option<String> {
-        let lines: Vec<&str> = self.text.lines().take(50).collect();
-        
-        match &self.file_type {
-            FileType::Rust | FileType::Python | FileType::JavaScript | 
-            FileType::TypeScript | FileType::Java | FileType::Go | 
-            FileType::C | FileType::CPP | FileType::Kotlin | FileType::Swift |
-            FileType::Ruby | FileType::PHP | FileType::Perl | FileType::Lua |
-            FileType::Shell | FileType::PowerShell => {
-                for line in &lines {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with("//") || trimmed.starts_with("#") || 
-                       trimmed.starts_with("/*") || trimmed.starts_with("--") {
-                        let comment = trimmed.trim_start_matches('/').trim_start_matches('#')
-                                            .trim_start_matches('*').trim_start_matches('-').trim();
-                        if !comment.is_empty() && comment.len() > 10 {
-                            return Some(format!("用法: {}", comment));
-                        }
-                    }
-                }
-                
-                let first_line = lines.first()?.trim();
-                if first_line.starts_with("fn ") || first_line.starts_with("def ") ||
-                   first_line.starts_with("function ") || first_line.starts_with("func ") {
-                    return Some(format!("目标: {}", first_line));
-                }
-                
-                Some("代码文件".to_string())
-            }
-            FileType::SQL => {
-                for line in &lines {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with("--") {
-                        let comment = trimmed.trim_start_matches('-').trim();
-                        if !comment.is_empty() {
-                            return Some(format!("查询: {}", comment));
-                        }
-                    }
-                }
-                Some("SQL 脚本".to_string())
-            }
-            FileType::HTML | FileType::CSS => {
-                if self.text.contains("<title>") {
-                    if let Some(start) = self.text.find("<title>") {
-                        if let Some(end) = self.text.find("</title>") {
-                            if end > start {
-                                return Some(format!("页面: {}", &self.text[start+7..end]));
-                            }
-                        }
-                    }
-                }
-                Some("网页文件".to_string())
-            }
-            FileType::Markdown => {
-                for line in &lines {
-                    if line.starts_with("# ") {
-                        return Some(format!("文档: {}", line.strip_prefix("# ").unwrap_or("")));
-                    }
-                }
-                Some("Markdown 文档".to_string())
-            }
-            FileType::Dockerfile => Some("Docker 构建配置".to_string()),
-            FileType::Makefile => Some("Make 构建脚本".to_string()),
-            FileType::CMake => Some("CMake 构建配置".to_string()),
-            _ => {
-                let word_count = self.text.split_whitespace().count();
-                let line_count = self.text.lines().count();
-                Some(format!("{} 行, {} 词", line_count, word_count))
-            }
-        }
-    }
-    
+
     fn save_file(&mut self) {
         if let Some(path) = &self.file_path {
-            if let Err(e) = fs::write(path, &self.text) {
-                self.message = Some(format!("保存失败: {}", e));
-            } else {
-                self.message = Some("文件已保存".to_string());
-                self.add_recent_path(path.clone());
+            // 检查文件名是否有意义
+            if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
+                if is_meaningless_filename(filename) {
+                    // 如果文件名无意义，显示命名建议
+                    self.save_suggestions = suggest_filenames(&self.text, Some(path), &self.file_type);
+                    if !self.save_suggestions.is_empty() {
+                        // 初始化文件名输入框，默认使用第一个建议
+                        self.save_filename_input = self.save_suggestions[0].clone();
+                        self.show_save_dialog = true;
+                        return;
+                    }
+                }
             }
+            // 直接保存
+            self.do_save(path.clone());
         } else {
-            self.message = Some("请先选择保存位置".to_string());
+            // 新建文件，显示命名建议
+            self.save_suggestions = suggest_filenames(&self.text, None, &self.file_type);
+            if !self.save_suggestions.is_empty() {
+                // 初始化文件名输入框，默认使用第一个建议
+                self.save_filename_input = self.save_suggestions[0].clone();
+                self.show_save_dialog = true;
+            } else {
+                self.message = Some("请先选择保存位置".to_string());
+            }
         }
+    }
+    
+    fn do_save(&mut self, path: PathBuf) {
+        if let Err(e) = fs::write(&path, &self.text) {
+            self.message = Some(format!("保存失败: {}", e));
+        } else {
+            self.file_path = Some(path.clone());
+            self.message = Some("文件已保存".to_string());
+            self.message_timeout = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+            self.add_recent_path(path);
+            self.update_file_type();
+        }
+    }
+    
+    fn handle_save_with_suggestion(&mut self, selected_name: String) {
+        if let Some(mut path) = self.file_path.clone() {
+            // 更新文件名
+            path.set_file_name(&selected_name);
+            self.do_save(path);
+        } else {
+            // 新建文件，使用建议的文件名打开保存对话框
+            if let Some(new_path) = rfd::FileDialog::new()
+                .set_file_name(&selected_name)
+                .save_file()
+            {
+                self.do_save(new_path);
+            }
+        }
+        self.show_save_dialog = false;
+        self.save_suggestions.clear();
+        self.save_filename_input.clear();
     }
     
     fn save_as(&mut self, path: PathBuf) {
@@ -276,19 +281,20 @@ impl TextEditor {
         }
     }
     
-    fn get_suggested_filename(&self) -> String {
-        if let Some(ref name) = self.suggested_filename {
-            name.clone()
-        } else {
-            suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type)
-        }
-    }
-    
     fn get_preview_mode(&self) -> PreviewMode {
         match &self.file_type {
             FileType::Markdown => PreviewMode::Markdown,
             FileType::SVG => PreviewMode::Image,
             FileType::Image(_) => PreviewMode::Image,
+            FileType::Mermaid => PreviewMode::Diagram,
+            FileType::Dot => PreviewMode::Diagram,
+            FileType::PlantUML => PreviewMode::Diagram,
+            FileType::Markmap => PreviewMode::Diagram,
+            // 文档格式（阅读器模式）
+            FileType::Word => PreviewMode::Reader,
+            FileType::PDF => PreviewMode::Reader,
+            FileType::Excel => PreviewMode::Reader,
+            FileType::PowerPoint => PreviewMode::Reader,
             _ if self.file_type.to_syntax_name().is_some() => PreviewMode::Highlighted,
             _ => PreviewMode::Editor,
         }
@@ -297,19 +303,59 @@ impl TextEditor {
 
 impl eframe::App for TextEditor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("文件", |ui| {
-                    if ui.button("新建").clicked() {
+        if self.is_dark_theme {
+            ctx.set_visuals(egui::Visuals::dark());
+        } else {
+            ctx.set_visuals(egui::Visuals::light());
+        }
+        
+        // 处理快捷键
+        let shortcuts = [
+            (egui::Key::N, egui::Modifiers::CTRL, "新建"),
+            (egui::Key::O, egui::Modifiers::CTRL, "打开"),
+            (egui::Key::S, egui::Modifiers::CTRL, "保存"),
+            (egui::Key::F4, egui::Modifiers::ALT, "退出"),
+        ];
+        
+        for (key, mods, action) in shortcuts {
+            if ctx.input_mut(|i| i.consume_key(mods, key)) {
+                match action {
+                    "新建" => {
                         self.text.clear();
                         self.file_path = None;
                         self.file_type = FileType::PlainText;
-                        self.summary = None;
-                        self.suggested_filename = None;
+                    },
+                    "打开" => {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            self.open_file(path);
+                        }
+                    },
+                    "保存" => {
+                        self.save_file();
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        // 处理拖拽文件
+        preview::handle_dropped_files(ctx, |paths| {
+            if let Some(path) = paths.first() {
+                self.open_file(path.clone());
+            }
+        });
+        
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("文件", |ui| {
+                    if ui.button("新建 (Ctrl+N)").clicked() {
+                        self.text.clear();
+                        self.file_path = None;
+                        self.file_type = FileType::PlainText;
                         ui.close_menu();
                     }
                     
-                    if ui.button("打开...").clicked() {
+                    if ui.button("打开... (Ctrl+O)").clicked() {
                         if let Some(path) = rfd::FileDialog::new().pick_file() {
                             self.open_file(path);
                         }
@@ -328,13 +374,13 @@ impl eframe::App for TextEditor {
                     
                     ui.separator();
                     
-                    if ui.button("保存").clicked() {
+                    if ui.button("保存 (Ctrl+S)").clicked() {
                         self.save_file();
                         ui.close_menu();
                     }
                     
                     if ui.button("另存为...").clicked() {
-                        let suggested = self.get_suggested_filename();
+                        let suggested = suggest_filename(&self.text, self.file_path.as_deref(), &self.file_type);
                         if let Some(path) = rfd::FileDialog::new()
                             .set_file_name(&suggested)
                             .save_file()
@@ -347,9 +393,56 @@ impl eframe::App for TextEditor {
                 
                 #[cfg(target_os = "windows")]
                 ui.menu_button("工具", |ui| {
-                    if ui.button("关联文件类型").clicked() {
-                        file_association::register_all_extensions();
-                        self.message = Some("文件关联已注册".to_string());
+                    if ui.button("关联所有文件类型").clicked() {
+                        match file_association::register_all_extensions() {
+                            Ok(_) => self.message = Some("✓ 所有文件类型已关联，右键菜单已添加".to_string()),
+                            Err(e) => self.message = Some(format!("✗ 关联失败: {}", e)),
+                        }
+                        ui.close_menu();
+                    }
+
+                    if ui.button("取消所有文件关联").clicked() {
+                        match file_association::unregister_all_extensions() {
+                            Ok(_) => self.message = Some("✓ 所有文件关联已取消，右键菜单已移除".to_string()),
+                            Err(e) => self.message = Some(format!("✗ 取消关联失败: {}", e)),
+                        }
+                        ui.close_menu();
+                    }
+
+                    ui.separator();
+
+                    if ui.button("添加右键菜单").clicked() {
+                        match file_association::register_context_menu() {
+                            Ok(_) => self.message = Some("✓ 右键菜单已添加".to_string()),
+                            Err(e) => self.message = Some(format!("✗ 添加失败: {}", e)),
+                        }
+                        ui.close_menu();
+                    }
+
+                    if ui.button("移除右键菜单").clicked() {
+                        match file_association::unregister_context_menu() {
+                            Ok(_) => self.message = Some("✓ 右键菜单已移除".to_string()),
+                            Err(e) => self.message = Some(format!("✗ 移除失败: {}", e)),
+                        }
+                        ui.close_menu();
+                    }
+
+                    ui.separator();
+
+                    if ui.button("查看关联状态").clicked() {
+                        let registered = file_association::get_registered_extensions();
+                        let unregistered = file_association::get_unregistered_extensions();
+                        let total = registered.len() + unregistered.len();
+                        self.message = Some(format!(
+                            "已关联: {}/{} 类型",
+                            registered.len(),
+                            total
+                        ));
+                        ui.close_menu();
+                    }
+                    
+                    if ui.button("📁 已支持文件类型").clicked() {
+                        self.current_tab = Tab::FileTypes;
                         ui.close_menu();
                     }
                 });
@@ -358,6 +451,31 @@ impl eframe::App for TextEditor {
                     if ui.button("关于 IrisNote").clicked() {
                         ui.close_menu();
                     }
+                    
+                    ui.separator();
+                    
+                    ui.menu_button("📁 支持的文件类型", |ui| {
+                        let categories = file_type::get_file_type_categories();
+                        
+                        ui.label("支持的文件类型分类：");
+                        ui.add_space(5.0);
+                        
+                        for category in categories {
+                            ui.horizontal(|ui| {
+                                ui.label(&category.name);
+                                ui.add_space(5.0);
+                                let exts: Vec<String> = category.extensions.iter()
+                                    .map(|e| e.clone())
+                                    .collect();
+                                ui.label(RichText::new(exts.join(" ")).size(11.0).color(Color32::GRAY));
+                            });
+                        }
+                        
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(5.0);
+                        ui.label("共计 50+ 文件类型");
+                    });
                     
                     ui.separator();
                     ui.label("IrisNote v0.1.0");
@@ -370,74 +488,299 @@ impl eframe::App for TextEditor {
                 });
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("⚙").clicked() {
-                        self.show_summary = !self.show_summary;
+                    let theme_text = if self.is_dark_theme { "☀" } else { "🌙" };
+                    if ui.small_button(theme_text).clicked() {
+                        self.is_dark_theme = !self.is_dark_theme;
                     }
                 });
             });
         });
         
-        if self.show_summary && (self.summary.is_some() || self.suggested_filename.is_some()) {
-            egui::TopBottomPanel::top("summary_bar")
+        // 保存命名建议对话框
+        if self.show_save_dialog {
+            let mut selected_name: Option<String> = None;
+            let mut should_close = false;
+            let mut should_save = false;
+            
+            egui::Window::new("保存文件")
                 .resizable(false)
-                .show_separator_line(false)
-                .frame(egui::Frame::default()
-                    .fill(Color32::from_rgb(45, 45, 48))
-                    .inner_margin(egui::vec2(8.0, 4.0))
-                )
+                .collapsible(false)
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        if let Some(ref summary) = self.summary {
-                            ui.label(RichText::new("📝 ").size(14.0).color(Color32::from_rgb(100, 200, 255)));
-                            ui.label(RichText::new(summary).size(13.0).color(Color32::from_rgb(220, 220, 220)));
-                            ui.add_space(10.0);
+                    ui.label(RichText::new("文件名:").size(14.0));
+                    ui.add_space(5.0);
+                    
+                    // 文件名输入框
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.save_filename_input)
+                            .desired_width(250.0)
+                    );
+                    
+                    // 回车保存
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        if !self.save_filename_input.is_empty() {
+                            should_save = true;
                         }
-                        
-                        if let Some(ref filename) = self.suggested_filename {
-                            ui.label(RichText::new("📁 ").size(14.0).color(Color32::from_rgb(100, 220, 100)));
-                            ui.label(RichText::new(format!("建议: {}", filename)).size(13.0).color(Color32::from_rgb(220, 220, 220)));
+                    }
+                    
+                    ui.add_space(10.0);
+                    
+                    // 建议名称
+                    ui.label(RichText::new("建议名称:").size(12.0).color(Color32::from_rgb(150, 150, 150)));
+                    ui.add_space(3.0);
+                    
+                    for (i, suggestion) in self.save_suggestions.iter().enumerate() {
+                        if ui.small_button(RichText::new(format!("{}. {}", i + 1, suggestion)).size(12.0)).clicked() {
+                            selected_name = Some(suggestion.clone());
                         }
-                    });
+                    }
+                    
+                    ui.add_space(15.0);
+                    
+                    if ui.button("取消").clicked() {
+                        should_close = true;
+                    }
                 });
+            
+            if should_save {
+                self.handle_save_with_suggestion(self.save_filename_input.clone());
+            } else if let Some(name) = selected_name {
+                self.handle_save_with_suggestion(name);
+            } else if should_close {
+                self.show_save_dialog = false;
+                self.save_suggestions.clear();
+                self.save_filename_input.clear();
+            }
         }
         
+        // 消息超时处理
+        if let Some(timeout) = self.message_timeout {
+            if std::time::Instant::now() >= timeout {
+                self.message = None;
+                self.message_timeout = None;
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.current_tab, Tab::Editor, "编辑器");
-                ui.selectable_value(&mut self.current_tab, Tab::Preview, "预览");
+                if self.file_type.has_visual_preview() {
+                    ui.selectable_value(&mut self.current_tab, Tab::Split, "分屏");
+                    ui.selectable_value(&mut self.current_tab, Tab::Preview, "预览");
+                }
             });
             ui.separator();
             
             match self.current_tab {
                 Tab::Editor => {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        let mut text = self.text.clone();
-                        let available = ui.available_size();
-                        ui.add(
-                            egui::TextEdit::multiline(&mut text)
-                                .desired_width(available.x - 10.0)
-                                .desired_rows(40)
-                                .font(FontId::monospace(14.0))
-                        );
-                        if text != self.text {
-                            self.text = text;
-                            self.update_file_type();
-                        }
-                    });
+                    self.render_editor(ui);
                 }
                 Tab::Preview => {
                     let preview_mode = self.get_preview_mode();
                     render_preview(ui, &self.text, &self.file_type, &preview_mode);
                 }
+                Tab::FileTypes => {
+                    // 已支持文件类型展示页面
+                    ui.horizontal(|ui| {
+                        let response = ui.text_edit_singleline(&mut self.file_type_search_query);
+                        if response.changed() {
+                            self.file_type_search_results = file_type::search_file_types(&self.file_type_search_query);
+                        }
+                        if ui.button("搜索").clicked() {
+                            self.file_type_search_results = file_type::search_file_types(&self.file_type_search_query);
+                        }
+                        ui.add_space(10.0);
+                        if ui.button("✕ 关闭").clicked() {
+                            self.current_tab = Tab::Editor;
+                        }
+                    });
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+                    
+                    // 平铺展示文件类型分类
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        if self.file_type_search_query.is_empty() {
+                            // 显示分类视图
+                            let categories = file_type::get_file_type_categories();
+                            for category in categories {
+                                ui.group(|ui| {
+                                    ui.heading(&category.name);
+                                    ui.add_space(5.0);
+                                    ui.columns(3, |columns| {
+                                        for (i, ext) in category.extensions.iter().enumerate() {
+                                            columns[i % 3].label(
+                                                RichText::new(ext)
+                                                    .font(FontId::monospace(13.0))
+                                                    .color(Color32::from_rgb(100, 180, 255))
+                                            );
+                                        }
+                                    });
+                                });
+                                ui.add_space(10.0);
+                            }
+                        } else {
+                            // 显示搜索结果
+                            let count = self.file_type_search_results.len();
+                            ui.label(format!("找到 {} 个匹配结果", count));
+                            ui.add_space(10.0);
+                            
+                            if self.file_type_search_results.is_empty() {
+                                ui.label("未找到匹配的文件类型");
+                            } else {
+                                ui.columns(2, |columns| {
+                                    for (ext, desc) in &self.file_type_search_results {
+                                        columns[0].label(
+                                            RichText::new(ext)
+                                                .font(FontId::monospace(13.0))
+                                                .color(Color32::from_rgb(100, 180, 255))
+                                        );
+                                        columns[1].label(desc);
+                                    }
+                                });
+                            }
+                        }
+                    });
+                }
+                Tab::Split => {
+                    // 分屏模式：左边预览，右边编辑
+                    let available_size = ui.available_size();
+                    let min_editor_width = (available_size.x * 0.1).max(50.0); // 源码区域至少10%宽度或50像素
+                    let preview_width = available_size.x - min_editor_width - 3.0; // 减去分隔线宽度
+                    
+                    ui.horizontal(|ui| {
+                        // 设置左侧区域大小
+                        ui.allocate_ui(
+                            [preview_width, available_size.y].into(),
+                            |ui| {
+                                ui.set_max_width(preview_width);
+                                ui.heading("预览");
+                                ui.separator();
+                                let preview_mode = self.get_preview_mode();
+                                
+                                egui::ScrollArea::vertical()
+                                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                                    .show(ui, |ui| {
+                                        let text_width = ui.available_size().x;
+                                        ui.allocate_ui_with_layout(
+                                            [text_width, f32::INFINITY].into(),
+                                            egui::Layout::top_down_justified(egui::Align::Min),
+                                            |ui| {
+                                                render_preview(ui, &self.text, &self.file_type, &preview_mode);
+                                            },
+                                        );
+                                    });
+                            },
+                        );
+                        
+                        // 分隔线
+                        ui.add(egui::Separator::default().spacing(3.0));
+                        
+                        // 设置右侧区域大小
+                        ui.allocate_ui(
+                            [min_editor_width, available_size.y].into(),
+                            |ui| {
+                                ui.set_max_width(min_editor_width);
+                                ui.heading("编辑器");
+                                ui.separator();
+                                self.render_editor(ui);
+                            },
+                        );
+                    });
+                }
             }
         });
         
-        if let Some(msg) = &self.message {
-            egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-                ui.horizontal(|ui| {
+        // 状态栏
+        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                // 左侧显示消息或状态
+                if let Some(ref msg) = self.message {
                     ui.label(RichText::new(msg).color(Color32::GREEN));
+                }
+                
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // 右侧显示光标位置和文件信息
+                    let (line, col) = self.get_cursor_position();
+                    let line_count = self.text.lines().count();
+                    let char_count = self.text.chars().count();
+                    
+                    let file_info = if let Some(ref path) = self.file_path {
+                        format!("{} | 第 {} 行, 第 {} 列 | {} 行 | {} 字符", 
+                            path.display(), line, col, line_count, char_count)
+                    } else {
+                        format!("第 {} 行, 第 {} 列 | {} 行 | {} 字符", 
+                            line, col, line_count, char_count)
+                    };
+                    
+                    ui.label(RichText::new(file_info).size(12.0).color(Color32::from_rgb(150, 150, 150)));
+                    
+                    ui.separator();
+                    
+                    // 显示文件类型
+                    let type_name = format!("{}", self.file_type);
+                    ui.label(RichText::new(type_name).size(12.0).color(Color32::from_rgb(100, 180, 255)));
                 });
             });
-        }
+        });
+    }
+}
+
+impl TextEditor {
+    fn render_editor(&mut self, ui: &mut egui::Ui) {
+        let syntax_name = self.file_type.to_syntax_name();
+        let has_highlighting = syntax_name.is_some();
+        
+        egui::ScrollArea::vertical()
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+            .show(ui, |ui| {
+                if has_highlighting {
+                    let theme = if self.is_dark_theme {
+                        CODE_THEME_DARK.get_or_init(|| CodeTheme::dark())
+                    } else {
+                        CODE_THEME_LIGHT.get_or_init(|| CodeTheme::light())
+                    };
+
+                    let language = syntax_name.unwrap_or("text");
+
+                    let mut text = self.text.clone();
+                    let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
+                        let mut layout_job = highlight(ui.ctx(), theme, string, language);
+                        layout_job.wrap.max_width = wrap_width;
+                        ui.fonts(|f| f.layout_job(layout_job))
+                    };
+
+                    egui::TextEdit::multiline(&mut text)
+                        .font(FontId::monospace(14.0))
+                        .code_editor()
+                        .layouter(&mut layouter)
+                        .hint_text("在此输入文本...")
+                        .desired_width(ui.available_width())
+                        .show(ui);
+
+                    if text != self.text {
+                        self.text = text;
+                        self.update_file_type();
+                        // 用户修改文件，清除保存消息
+                        self.message = None;
+                        self.message_timeout = None;
+                    }
+                } else {
+                    let mut text = self.text.clone();
+                    
+                    egui::TextEdit::multiline(&mut text)
+                        .font(FontId::monospace(14.0))
+                        .hint_text("在此输入文本...")
+                        .desired_width(ui.available_width())
+                        .show(ui);
+                    
+                    if text != self.text {
+                        self.text = text;
+                        self.update_file_type();
+                        // 用户修改文件，清除保存消息
+                        self.message = None;
+                        self.message_timeout = None;
+                    }
+                }
+            });
     }
 }

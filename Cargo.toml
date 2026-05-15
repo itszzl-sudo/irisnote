@@ -13,7 +13,7 @@ default = []
 [dependencies]
 eframe = "0.27"
 egui = "0.27"
-egui_extras = "0.27"
+egui_extras = { version = "0.27", features = ["syntect"] }
 syntect = "5"
 pulldown-cmark = "0.10"
 serde = { version = "1", features = ["derive"] }
@@ -25,6 +25,8 @@ usvg = "0.40"
 tiny-skia = "0.11"
 winreg = "0.52"
 rfd = "0.14"
+mermaid-rs-renderer = "0.2.2"
+mermaid-text = "0.48.0"
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
